@@ -3,7 +3,8 @@
  * 把源文（标题 / 正文段落 / 脚注）按给定页面几何切分为若干页。
  *
  * 保证的约束：
- *  - 标题后至少跟随 KEEP_LINES 行正文，否则标题移到下一页（keep-with-next）
+ *  - 标题后至少跟随 KEEP_LINES 行正文（可跨短段落收集），否则标题链整体
+ *    移到下一页（keep-with-next 前瞻 + 页尾兜底），页底不留"标题加一行"
  *  - 段落跨页时，页底与页首都至少保留 2 行（orphans / widows 控制）
  *  - 脚注集中排在其引用所在页的底部；引用行放不下时连同脚注一起后移
  *  - 内容或页面尺寸变化后整体重排，页码始终对应同一段文字
@@ -212,6 +213,24 @@ function paginateUnits(units, contentH, fnH) {
     space = contentH - used - (fns.length ? FN_SEP_H + refsH(fns) : 0)
   }
 
+  /* 页尾兜底：若一页以“标题链 + 不足 n 行正文（n < KEEP_LINES）”收尾，
+   * 把标题链连同那点正文一起弹到下一页（其上的脚注随 rebuild 一并带走）。
+   * 标题链就在页首时退无可退，保留现状。 */
+  function fixPageTail() {
+    const end = items.length
+    let k = end - 1
+    let bodyLines = 0
+    while (k >= 0 && items[k].kind === 'line') { bodyLines++; k-- }
+    if (bodyLines >= KEEP_LINES) return
+    let h = k
+    while (h >= 0 && items[h].kind === 'block' && items[h].keepNext) h--
+    if (h === k || h < 0) return // 页尾不是标题链，或标题链已在页首
+    const popCount = end - (h + 1)
+    items.length = h + 1
+    i -= popCount
+    rebuild()
+  }
+
   function closePage() {
     if (items.length) {
       pages.push({ items, fns: fns.slice() })
@@ -237,23 +256,16 @@ function paginateUnits(units, contentH, fnH) {
         look += w.height + w.tail + refsH(wr)
         j++
       }
-      if (j < units.length) {
-        const v = units[j]
-        if (v.kind === 'line') {
-          const take = Math.min(KEEP_LINES, v.total)
-          for (let tIdx = 0; tIdx < take; tIdx++) {
-            const w = units[j + tIdx]
-            if (!w || w.kind !== 'line' || w.paraEl !== v.paraEl) break
-            const wr = fresh(w, seen); seen.push(...wr)
-            look += w.height + w.tail + refsH(wr)
-          }
-        } else {
-          const vr = fresh(v, seen); seen.push(...vr)
-          look += v.height + v.tail + refsH(vr)
-        }
+      /* 再向后收集 KEEP_LINES 行正文（可跨短段落）；遇到整体块则要求块本身同页 */
+      let gathered = 0
+      while (j < units.length && gathered < KEEP_LINES) {
+        const w = units[j]
+        const wr = fresh(w, seen); seen.push(...wr)
+        look += w.height + w.tail + refsH(wr)
+        if (w.kind === 'line') { gathered++; j++ } else break
       }
       if (seen.length && fns.length === 0 && !sepCounted) look += FN_SEP_H
-      if (look > space + EPS) { closePage(); continue }
+      if (look > space + EPS) { fixPageTail(); closePage(); continue }
     }
 
     if (need <= space + EPS || items.length === 0) {
@@ -277,6 +289,7 @@ function paginateUnits(units, contentH, fnH) {
         }
         if (popped) { i -= popped; rebuild() }
       }
+      fixPageTail() // 页尾不能只剩标题（链）或标题加一行正文
       closePage()
     }
   }
