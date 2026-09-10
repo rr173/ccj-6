@@ -239,6 +239,7 @@ function paginateUnits(units, contentH, fnH) {
     items = []; fns = []; space = contentH
   }
 
+  for (;;) {
   while (i < units.length) {
     const u = units[i]
     const nrefs = fresh(u)
@@ -293,7 +294,12 @@ function paginateUnits(units, contentH, fnH) {
       closePage()
     }
   }
-  closePage()
+    /* 文档自然结束也要做页尾检查；弹回去的标题链继续装到下一页 */
+    const before = i
+    fixPageTail()
+    closePage()
+    if (i >= units.length || i >= before) break
+  }
   return pages
 }
 
