@@ -1,0 +1,176 @@
+/* ============ 基础布局 ============ */
+:root {
+  --bg: #e9ebee;
+  --page-bg: #ffffff;
+  --ink: #1f2328;
+  --muted: #6a737d;
+  --accent: #2563eb;
+  --bar: #111827;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  font: 14px/1.5 -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  background: var(--bg);
+  color: var(--ink);
+}
+
+/* ============ 工具栏 ============ */
+.toolbar {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 10px 16px;
+  background: var(--bar);
+  color: #fff;
+}
+.toolbar h1 { font-size: 15px; margin: 0; font-weight: 600; }
+.actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.status { font-size: 12px; color: #9ca3af; margin-right: 6px; }
+
+button {
+  font: inherit;
+  padding: 6px 12px;
+  border: 1px solid #374151;
+  border-radius: 6px;
+  background: #1f2937;
+  color: #e5e7eb;
+  cursor: pointer;
+}
+button:hover { background: #374151; }
+button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+button.primary:hover { background: #1d4ed8; }
+
+/* ============ 预览区与页面 ============ */
+#preview { padding: 24px 16px 64px; }
+#pages { display: flex; flex-direction: column; align-items: center; gap: 24px; }
+
+.page {
+  position: relative;
+  background: var(--page-bg);
+  box-shadow: 0 2px 14px rgba(0, 0, 0, .18);
+  overflow: hidden;
+}
+
+.page-header,
+.page-footer {
+  position: absolute;
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  font-size: 11px;
+  color: var(--muted);
+  pointer-events: none;
+}
+.page-header { top: 12px; padding-bottom: 6px; border-bottom: 1px solid #ddd; }
+.page-footer { bottom: 10px; padding-top: 6px; border-top: 1px solid #ddd; justify-content: center; }
+.page-footer .pf-num { letter-spacing: .05em; }
+
+.page-body { position: relative; overflow: hidden; }
+
+/* ============ 正文排版（测量容器与页面共用，保证行断一致） ============ */
+.doc-flow {
+  font: 16px/1.75 "Songti SC", "Noto Serif CJK SC", "Source Han Serif SC", "SimSun", serif;
+  color: var(--ink);
+  text-align: justify;
+}
+.doc-flow > * { margin-top: 0; }            /* 一律用 margin-bottom 控制间距，便于测量 */
+.doc-flow h1 { font-size: 26px; line-height: 1.4; margin: 0 0 18px; }
+.doc-flow h2 { font-size: 20px; line-height: 1.5; margin: 0 0 14px; padding-top: 8px; }
+.doc-flow p  { margin: 0 0 14px; }
+.doc-flow ul { margin: 0 0 14px; padding-left: 1.5em; }
+.doc-flow li { margin-bottom: 4px; }
+.doc-flow blockquote {
+  margin: 0 0 14px;
+  padding: 8px 14px;
+  border-left: 3px solid #cbd5e1;
+  background: #f8fafc;
+  color: #475569;
+}
+.doc-flow blockquote p { margin: 0; }
+.doc-flow img { max-width: 100%; }
+
+.doc-flow .ln { display: block; }           /* 分页切出的行块 */
+
+.fn-ref {
+  color: var(--accent);
+  font-size: .72em;
+  line-height: 0;
+  vertical-align: super;
+}
+.fn-ref::before { content: "["; }
+.fn-ref::after  { content: "]"; }
+
+/* ============ 页内脚注区 ============ */
+.page-fns {
+  position: absolute;
+  font-size: 12px;
+  line-height: 1.6;
+  color: #444;
+}
+.fn-sep { width: 38%; border-top: 1px solid #999; margin: 0 0 8px; }
+.fn-item { display: flex; gap: 6px; margin-bottom: 4px; }
+.fn-item .fn-no { flex: none; color: var(--accent); }
+
+/* ============ 隐藏测量容器 ============ */
+.measure-host {
+  position: absolute;
+  left: -100000px;
+  top: 0;
+  visibility: hidden;
+  pointer-events: none;
+}
+
+/* ============ 源文编辑弹窗 ============ */
+#modal {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, .45);
+}
+#modal[hidden] { display: none; }
+.modal-box {
+  width: min(860px, 92vw);
+  max-height: 88vh;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 18px;
+  background: #fff;
+  border-radius: 10px;
+}
+.modal-box h2 { margin: 0; font-size: 16px; }
+.modal-tip { margin: 0; font-size: 12px; color: var(--muted); }
+.modal-tip code { background: #f1f5f9; padding: 1px 4px; border-radius: 4px; }
+#src-editor {
+  width: 100%;
+  min-height: 46vh;
+  resize: vertical;
+  font: 12px/1.6 ui-monospace, SFMono-Regular, Consolas, monospace;
+  padding: 10px;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+}
+.modal-actions { display: flex; justify-content: flex-end; gap: 8px; }
+.modal-actions button { background: #f3f4f6; color: var(--ink); border-color: #d1d5db; }
+.modal-actions button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+
+/* ============ 直接打印当前页（备用路径） ============ */
+@media print {
+  .toolbar, #modal { display: none !important; }
+  body { background: #fff; }
+  #preview { padding: 0; }
+  #pages { gap: 0; display: block; }
+  .page { box-shadow: none; margin: 0 auto; break-after: page; }
+  .page:last-child { break-after: auto; }
+}
