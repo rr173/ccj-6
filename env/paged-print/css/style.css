@@ -119,6 +119,30 @@ button.primary:hover { background: #1d4ed8; }
 .fn-item { display: flex; gap: 6px; margin-bottom: 4px; }
 .fn-item .fn-no { flex: none; color: var(--accent); }
 
+/* ============ 目录 ============ */
+.doc-flow .toc-title { text-align: center; }
+.toc-entry { margin: 0 0 10px; }
+.toc-entry a {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  color: inherit;
+  text-decoration: none;
+}
+.toc-entry a:hover { color: var(--accent); }
+.toc-entry .toc-txt {
+  flex: 0 1 auto;
+  overflow: hidden;
+  white-space: nowrap;        /* 条目恒为单行，目录页数与页码数字宽度无关 */
+  text-overflow: ellipsis;
+}
+.toc-entry .toc-dots {
+  flex: 1 0 24px;
+  border-bottom: 2px dotted #b6bec9;
+  transform: translateY(-4px);
+}
+.toc-entry .toc-pg { flex: none; font-variant-numeric: tabular-nums; }
+
 /* ============ 隐藏测量容器 ============ */
 .measure-host {
   position: absolute;

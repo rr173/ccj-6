@@ -108,6 +108,14 @@ function splitParagraph(p) {
     spans.unshift(span)
   }
 
+  /* 行界恰好切开上标引用时会留下空壳（还会渲染出空的 "[]"），
+   * 丢掉空壳，让脚注只跟随真正带编号的那一行 */
+  for (const sp of spans) {
+    for (const s of sp.querySelectorAll('.fn-ref')) {
+      if (s.textContent === '') s.remove()
+    }
+  }
+
   /* 丢弃纯空白行（如段尾残留的空格行） */
   const kept = []
   for (const sp of spans) {
@@ -312,6 +320,7 @@ function renderPages(pages, geo, meta) {
   pages.forEach((pg, pi) => {
     const page = document.createElement('section')
     page.className = 'page'
+    page.id = 'p' + (pi + 1) // 目录条目的锚点目标
     page.style.width = geo.W + 'px'
     page.style.height = geo.H + 'px'
     page.style.padding = `${geo.mT}px ${geo.mX}px ${geo.mB}px`

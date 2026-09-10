@@ -11,6 +11,50 @@ let geo = null
 const getSource = () => srcTpl.innerHTML
 const setSource = html => { srcTpl.innerHTML = html }
 
+/* 目录收集哪些标题（小节标题） */
+const TOC_SELECTOR = 'h2'
+
+/* ---------- 目录 ----------
+ * 目录条目页码 = 标题所在正文页 + 目录自身页数，二者互相依赖：
+ * 条目单行定高（高度与页码数字无关），迭代到目录页数稳定即可收敛。
+ */
+function buildTocUnits(texts, headPage, offset, geo) {
+  const host = document.createElement('div')
+  host.className = 'doc-flow measure-host'
+  host.style.width = geo.contentW + 'px'
+  const box = document.createElement('div')
+
+  const title = document.createElement('h1')
+  title.className = 'toc-title'
+  title.textContent = '目录'
+  box.appendChild(title)
+
+  texts.forEach((text, i) => {
+    const pageNo = (headPage[i] || 0) + offset + 1
+    const entry = document.createElement('div')
+    entry.className = 'toc-entry'
+    const a = document.createElement('a')
+    a.href = '#p' + pageNo
+    const txt = document.createElement('span')
+    txt.className = 'toc-txt'
+    txt.textContent = text
+    const dots = document.createElement('span')
+    dots.className = 'toc-dots'
+    const pg = document.createElement('span')
+    pg.className = 'toc-pg'
+    pg.textContent = pageNo
+    a.append(txt, dots, pg)
+    entry.appendChild(a)
+    box.appendChild(entry)
+  })
+
+  host.appendChild(box)
+  document.body.appendChild(host)
+  const units = measureUnits(box) // h1 + 每个条目各为一个整体块单元
+  host.remove() // 元素已脱离文档，渲染时再搬入页面
+  return units
+}
+
 /* ---------- 重新分页（唯一的重排入口） ---------- */
 function repaginate() {
   geo = pageGeometry(previewEl.clientWidth - 32)
@@ -41,12 +85,45 @@ function repaginate() {
     s.textContent = fnNum.get(k)
   })
 
-  // 4. 测量 → 装箱 → 渲染
+  // 4. 标记小节标题（data-toc 随元素进入分页结果，用于定位目录页码）
+  const tocTexts = []
+  article.querySelectorAll(TOC_SELECTOR).forEach(h => {
+    const text = h.textContent.trim()
+    if (!text) return
+    h.dataset.toc = tocTexts.length
+    tocTexts.push(text)
+  })
+
+  // 5. 测量 → 装箱正文
   const fnH = measureFootnotes(defs, geo.contentW, fnNum)
   const units = measureUnits(article)
-  const pages = paginateUnits(units, geo.contentH, fnH)
+  const bodyPages = paginateUnits(units, geo.contentH, fnH)
+
+  // 6. 从装箱结果读出每个标题真正落在哪一页（正文内页码，0 起）
+  const headPage = tocTexts.map(() => 0)
+  bodyPages.forEach((pg, pi) => {
+    for (const u of pg.items) {
+      if (u.kind === 'block' && u.el.dataset && u.el.dataset.toc !== undefined) {
+        headPage[+u.el.dataset.toc] = pi
+      }
+    }
+  })
+
+  // 7. 目录自身装箱：页码依赖目录页数，迭代到页数稳定
+  let tocPages = []
+  if (tocTexts.length) {
+    let offset = 0
+    for (let iter = 0; iter < 5; iter++) {
+      tocPages = paginateUnits(buildTocUnits(tocTexts, headPage, offset, geo), geo.contentH, new Map())
+      if (tocPages.length === offset) break
+      offset = tocPages.length
+    }
+  }
+
+  // 8. 渲染：目录页在前，正文页码接续编号
   const h1 = article.querySelector('h1')
-  const frag = renderPages(pages, geo, {
+  const allPages = [...tocPages, ...bodyPages]
+  const frag = renderPages(allPages, geo, {
     title: h1 ? h1.textContent : '未命名文档',
     subtitle: '自动分页 · 页码实时重排',
     defs,
@@ -55,8 +132,17 @@ function repaginate() {
   pagesEl.replaceChildren(frag)
   host.remove()
 
-  statusEl.textContent = `共 ${pages.length} 页 · 版面宽 ${geo.W}px · 缩放窗口或修改内容后自动重排`
+  statusEl.textContent = `共 ${allPages.length} 页（目录 ${tocPages.length} 页）· 版面宽 ${geo.W}px · 缩放窗口或修改内容后自动重排`
 }
+
+/* ---------- 目录点击 → 翻到目标页（导出的打印文档里则走原生锚点） ---------- */
+pagesEl.addEventListener('click', e => {
+  const a = e.target.closest('.toc-entry a[href^="#p"]')
+  if (!a) return
+  e.preventDefault()
+  const target = document.getElementById(a.getAttribute('href').slice(1))
+  if (target) target.scrollIntoView({ behavior: 'smooth', block: 'start' })
+})
 
 /* ---------- 窗口缩放 → 重新分页（防抖，仅宽度变化时触发） ---------- */
 let resizeTimer = 0
