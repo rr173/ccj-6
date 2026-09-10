@@ -108,6 +108,17 @@ button.primary:hover { background: #1d4ed8; }
 .fn-ref::before { content: "["; }
 .fn-ref::after  { content: "]"; }
 
+/* ============ 文内互见 ============ */
+.doc-flow .xref {
+  color: var(--accent);
+  text-decoration: none;
+}
+.doc-flow .xref:hover { text-decoration: underline; }
+.doc-flow .xref .xref-pg {
+  white-space: nowrap;                 /* “第 10 页”作为整体参与换行 */
+  font-variant-numeric: tabular-nums;  /* 1 与 10 只按位数变宽，不按字形抖动 */
+}
+
 /* ============ 页内脚注区 ============ */
 .page-fns {
   position: absolute;

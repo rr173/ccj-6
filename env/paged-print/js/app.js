@@ -55,11 +55,8 @@ function buildTocUnits(texts, headPage, offset, geo) {
   return units
 }
 
-/* ---------- 重新分页（唯一的重排入口） ---------- */
-function repaginate() {
-  geo = pageGeometry(previewEl.clientWidth - 32)
-
-  // 1. 在与页内正文区等宽的隐藏容器里克隆源文
+/* ---------- 源文克隆：提取脚注、编号、目录目标 ---------- */
+function createMeasureArticle(geo) {
   const host = document.createElement('div')
   host.className = 'doc-flow measure-host'
   host.style.width = geo.contentW + 'px'
@@ -68,7 +65,6 @@ function repaginate() {
   host.appendChild(article)
   document.body.appendChild(host)
 
-  // 2. 提取脚注定义，并从正文中移除
   const defs = new Map()
   const defSec = article.querySelector('.fn-defs')
   if (defSec) {
@@ -76,7 +72,6 @@ function repaginate() {
     defSec.remove()
   }
 
-  // 3. 按文档顺序为脚注引用编号
   const fnNum = new Map()
   let n = 0
   article.querySelectorAll('.fn-ref').forEach(s => {
@@ -85,42 +80,141 @@ function repaginate() {
     s.textContent = fnNum.get(k)
   })
 
-  // 4. 标记小节标题（data-toc 随元素进入分页结果，用于定位目录页码）
   const tocTexts = []
+  const targetIds = new Set()
   article.querySelectorAll(TOC_SELECTOR).forEach(h => {
     const text = h.textContent.trim()
     if (!text) return
     h.dataset.toc = tocTexts.length
     tocTexts.push(text)
+    if (h.id) targetIds.add(h.id)
   })
 
-  // 5. 测量 → 装箱正文
-  const fnH = measureFootnotes(defs, geo.contentW, fnNum)
-  const units = measureUnits(article)
-  const bodyPages = paginateUnits(units, geo.contentH, fnH)
+  return { host, article, defs, fnNum, tocTexts, targetIds }
+}
 
-  // 6. 从装箱结果读出每个标题真正落在哪一页（正文内页码，0 起）
-  const headPage = tocTexts.map(() => 0)
-  bodyPages.forEach((pg, pi) => {
-    for (const u of pg.items) {
-      if (u.kind === 'block' && u.el.dataset && u.el.dataset.toc !== undefined) {
-        headPage[+u.el.dataset.toc] = pi
-      }
+/* ---------- 文内互见 ----------
+ * 锚点文本里用 # 占位页码。页码 span 不允许断行、等宽数字，
+ * 因此它对版面的影响只取决于位数（1 / 10 / …）。
+ */
+function fillCrossReferences(article, labels, targetIds) {
+  const refs = Array.from(article.querySelectorAll('a.xref[data-target]'))
+  refs.forEach((a, i) => {
+    const target = a.dataset.target
+    const label = labels[i] || '1'
+    const ok = targetIds.has(target) && /^\d+$/.test(label)
+
+    const pg = document.createElement('span')
+    pg.className = 'xref-pg'
+    pg.textContent = ok ? label : '?'
+
+    let textNode = null
+    const walker = document.createTreeWalker(a, NodeFilter.SHOW_TEXT)
+    while (walker.nextNode()) {
+      if (walker.currentNode.nodeValue.includes('#')) { textNode = walker.currentNode; break }
+    }
+    if (textNode) {
+      const value = textNode.nodeValue
+      const idx = value.indexOf('#')
+      const includePre = idx > 0 && value[idx - 1] === '第'
+      const includePost = idx + 1 < value.length && value[idx + 1] === '页'
+      const start = includePre ? idx - 1 : idx
+      const end = includePost ? idx + 2 : idx + 1
+      const after = document.createTextNode(value.slice(end))
+      textNode.nodeValue = value.slice(0, start)
+      pg.textContent = includePre ? `第${label}页` : label
+      textNode.after(pg, after)
+    } else {
+      pg.textContent = ok ? `（第 ${label} 页）` : '（页码待定）'
+      a.appendChild(pg)
+    }
+
+    if (ok) {
+      a.href = '#p' + label
+      a.dataset.page = label
+      a.removeAttribute('aria-disabled')
+      a.removeAttribute('title')
+    } else {
+      a.removeAttribute('href')
+      a.removeAttribute('data-page')
+      a.setAttribute('aria-disabled', 'true')
+      a.title = `未找到互见目标：${target}`
+      console.warn('文内互见缺少对应小节（h2[id]）：', target)
     }
   })
+  return refs
+}
 
-  // 7. 目录自身装箱：页码依赖目录页数，迭代到页数稳定
-  let tocPages = []
+/* ---------- 重新分页（唯一的重排入口） ---------- */
+function repaginate() {
+  geo = pageGeometry(previewEl.clientWidth - 32)
+
+  // 1. 目录条目恒为单行定高，目录占几页只取决于条目数，与正文页码无关，先量一次
+  const probe = createMeasureArticle(geo)
+  const { tocTexts, targetIds } = probe
+  let tocPageCount = 0
   if (tocTexts.length) {
-    let offset = 0
-    for (let iter = 0; iter < 5; iter++) {
-      tocPages = paginateUnits(buildTocUnits(tocTexts, headPage, offset, geo), geo.contentH, new Map())
-      if (tocPages.length === offset) break
-      offset = tocPages.length
+    tocPageCount = paginateUnits(
+      buildTocUnits(tocTexts, tocTexts.map(() => 0), 0, geo),
+      geo.contentH,
+      new Map()
+    ).length
+  }
+  probe.host.remove()
+
+  // 2. 互见页码不动点迭代：
+  //    用旧页码排版 → 读出每个标题的真实落页 → 用新页码重排，直到两者一致。
+  //    初值一律放最小的一位数“1”：页码只会 1 → 10 变宽，页数单调不减，
+  //    每次改动都只可能把目标标题继续向后推，因此迭代必收敛，不会新旧页来回跳。
+  let labels = []
+  let laid = null
+  for (let iter = 0; iter < 20; iter++) {
+    const built = createMeasureArticle(geo)
+    if (iter === 0) {
+      labels = Array.from(built.article.querySelectorAll('a.xref[data-target]')).map(
+        a => built.targetIds.has(a.dataset.target) ? '1' : '?'
+      )
     }
+    const xrefs = fillCrossReferences(built.article, labels, built.targetIds)
+
+    const fnH = measureFootnotes(built.defs, geo.contentW, built.fnNum)
+    const units = measureUnits(built.article)
+    const bodyPages = paginateUnits(units, geo.contentH, fnH)
+
+    const headPage = built.tocTexts.map(() => 0)
+    const pageById = new Map()
+    bodyPages.forEach((pg, pi) => {
+      for (const u of pg.items) {
+        if (u.kind === 'block' && u.el.dataset && u.el.dataset.toc !== undefined) {
+          headPage[+u.el.dataset.toc] = pi
+          if (u.el.id) pageById.set(u.el.id, pi + tocPageCount + 1)
+        }
+      }
+    })
+
+    const nextLabels = xrefs.map(a =>
+      built.targetIds.has(a.dataset.target) ? String(pageById.get(a.dataset.target)) : '?'
+    )
+
+    if (laid) laid.host.remove()
+    laid = { ...built, bodyPages, headPage, labels: nextLabels }
+    if (nextLabels.every((v, i) => v === labels[i])) break
+    labels = nextLabels
   }
 
-  // 8. 渲染：目录页在前，正文页码接续编号
+  const { host, article, defs, fnNum, bodyPages, headPage } = laid
+
+  // 3. 目录条目填入最终页码后再装箱（条目高度与页码位数无关，页数仍等于 tocPageCount）
+  let tocPages = []
+  if (tocTexts.length) {
+    tocPages = paginateUnits(
+      buildTocUnits(tocTexts, headPage, tocPageCount, geo),
+      geo.contentH,
+      new Map()
+    )
+  }
+
+  // 4. 渲染：目录页在前，正文页码接续编号
   const h1 = article.querySelector('h1')
   const allPages = [...tocPages, ...bodyPages]
   const frag = renderPages(allPages, geo, {
@@ -135,9 +229,9 @@ function repaginate() {
   statusEl.textContent = `共 ${allPages.length} 页（目录 ${tocPages.length} 页）· 版面宽 ${geo.W}px · 缩放窗口或修改内容后自动重排`
 }
 
-/* ---------- 目录点击 → 翻到目标页（导出的打印文档里则走原生锚点） ---------- */
+/* ---------- 目录 / 互见点击 → 翻到目标页（导出的打印文档里则走原生锚点） ---------- */
 pagesEl.addEventListener('click', e => {
-  const a = e.target.closest('.toc-entry a[href^="#p"]')
+  const a = e.target.closest('.toc-entry a[href^="#p"], a.xref[href^="#p"]')
   if (!a) return
   e.preventDefault()
   const target = document.getElementById(a.getAttribute('href').slice(1))
