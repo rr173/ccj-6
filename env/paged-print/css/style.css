@@ -101,6 +101,37 @@ button.primary:hover { background: #1d4ed8; }
 .doc-flow blockquote p { margin: 0; }
 .doc-flow img { max-width: 100%; }
 
+/* ============ 跨页表 ============
+ * 测量容器里的源表与渲染页里的表片共用同一套样式；
+ * 列宽由引擎写入 colgroup 并锁定 table-layout:fixed，
+ * 正表与各续表列宽逐列一致。 */
+.doc-flow table.doc-table {
+  border-collapse: collapse;
+  margin: 0 0 14px;
+  font-size: 14px;
+  line-height: 1.6;
+}
+.doc-table caption {
+  caption-side: top;
+  text-align: center;
+  font-weight: 600;
+  padding: 0 8px 6px;
+  color: var(--ink);
+  white-space: normal;
+}
+.doc-table.continued caption { font-weight: 400; color: var(--muted); }
+.doc-table th,
+.doc-table td {
+  border: 1px solid #c2c8d0;
+  padding: 5px 8px;
+  text-align: left;
+  vertical-align: top;
+  word-break: break-word;
+}
+.doc-table thead th { background: #f1f5f9; font-weight: 600; }
+.doc-flow .doc-table p { margin: 0 0 4px; }
+.doc-flow .doc-table p:last-child { margin-bottom: 0; }
+
 .doc-flow .ln { display: block; }           /* 分页切出的行块 */
 
 .fn-ref {

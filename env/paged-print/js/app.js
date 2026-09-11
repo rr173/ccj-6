@@ -290,6 +290,36 @@ document.getElementById('btn-remove').addEventListener('click', () => {
   if (ps.length > 1) { ps[ps.length - 1].remove(); repaginate() }
 })
 
+/* ---------- 表行增删（模拟表格变高变矮，切开位置应整体重算） ---------- */
+const TABLE_ROWS = [
+  ['21 世纪初', '可重排电子书', 'EPUB / Kindle 等标准', '版面随字号、栏宽实时重排，跨页表在设备上变为连续滚动、打印时重新分页。'],
+  ['当代', '浏览器分页脚本', '各类出版与报表系统', '用“测量—装箱—渲染”补齐脚注同页、跨页表等原生能力，每次变化整盘重排。'],
+  ['展望', '可变字体与响应式版面', '字体厂商与规范组织', '字宽、字重连续可调，表格与正文在同一套度量下自适应纸张与屏幕。'],
+]
+let tableRowCycle = 0
+
+document.getElementById('btn-add-row').addEventListener('click', () => {
+  const tbody = srcTpl.content.querySelector('table tbody')
+  if (!tbody) return
+  const [a, b, c, d] = TABLE_ROWS[tableRowCycle++ % TABLE_ROWS.length]
+  const tr = document.createElement('tr')
+  ;[a, b, c, d].forEach(text => {
+    const td = document.createElement('td')
+    td.textContent = text
+    tr.appendChild(td)
+  })
+  tbody.appendChild(tr)
+  repaginate()
+})
+
+document.getElementById('btn-del-row').addEventListener('click', () => {
+  const tbody = srcTpl.content.querySelector('table tbody')
+  if (tbody && tbody.rows.length > 1) {
+    tbody.deleteRow(-1)
+    repaginate()
+  }
+})
+
 /* ---------- 源文编辑 ---------- */
 const modal = document.getElementById('modal')
 const editor = document.getElementById('src-editor')

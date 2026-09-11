@@ -15,6 +15,8 @@
     <span id="status" class="status"></span>
     <button id="btn-insert" type="button">插入一段</button>
     <button id="btn-remove" type="button">删除末段</button>
+    <button id="btn-add-row" type="button">表中加一行</button>
+    <button id="btn-del-row" type="button">表中删一行</button>
     <button id="btn-edit" type="button">编辑源文</button>
     <button id="btn-export" type="button" class="primary">导出打印预览</button>
   </div>
@@ -64,6 +66,46 @@
 
   <p>这种“测量—装箱—渲染”的思路，本质上是在浏览器里复刻当年捡字工人的工作：只不过工人眼里的字盘，变成了文档对象模型；手里的镊子，变成了矩形测量接口。内容变化时整盘重排，页码自然始终对准同一段文字——这正是本页演示的分页引擎所采用的方法。</p>
 
+  <h2 id="sec-table">跨页表：一页装不下时接着排</h2>
+
+  <p>表格和段落一样会遇到页界。处理原则是只允许在<strong>行与行之间</strong>切开：本页放不下的行整行移到下一页，续页上重新印出表头，并在题注处标明「续表」。下面这张表故意做得很长，单页排不下，可以看到正表与续表如何协作；增删表行或拉窄窗口后，切开位置与续表落页都会随整盘重排重新计算。它与<a class="xref" data-target="sec-digital" href="#sec-digital">“数字时代的分页难题（第#页）”</a>里描述的是同一套引擎，只是装箱单元从文本行扩展成了表行。</p>
+
+  <table>
+    <caption>表 1　排版工艺演进简表（公元前至二十世纪）</caption>
+    <thead>
+      <tr>
+        <th style="width:18%">时期 / 年代</th>
+        <th style="width:20%">工艺或系统</th>
+        <th style="width:24%">代表地区与人物</th>
+        <th style="width:38%">版面意义与影响</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr><td>唐代以前</td><td>抄书制度</td><td>各地抄书人、经生</td><td>以固定行距、栏宽与留白降低阅读疲劳，奠定版面秩序的雏形。</td></tr>
+      <tr><td>约 7 世纪</td><td>雕版印刷</td><td>中国、朝鲜半岛</td><td>整版雕刻、反复刷印，刀法与木纹影响了早期正文字体的笔画性格。</td></tr>
+      <tr><td>北宋庆历年间</td><td>泥活字</td><td>毕昇</td><td>单字可反复排版使用，版面第一次具备“可重组”属性<sup class="fn-ref" data-fn="bixin"></sup>。</td></tr>
+      <tr><td>元代</td><td>木活字、转轮排字盘</td><td>王祯</td><td>活字按韵归盘，捡字效率大增，排字工序进一步分工。</td></tr>
+      <tr><td>13 世纪</td><td>金属（铜锡）活字</td><td>高丽、中国江南</td><td>字模更耐久，适合大批量印书，铸字工艺开始标准化。</td></tr>
+      <tr><td>约 1450 年</td><td>金属活字系统</td><td>古登堡（美因茨）</td><td>活字、油性油墨与螺旋压印机组合成完整生产系统，书价大幅下降<sup class="fn-ref" data-fn="gutenberg"></sup>。</td></tr>
+      <tr><td>15 世纪末</td><td>阿尔杜斯版书籍</td><td>阿尔杜斯·马努提乌斯（威尼斯）</td><td>较小开本与斜体字让书籍便携化，版面密度与留白重新平衡。</td></tr>
+      <tr><td>16 世纪</td><td>植物学、解剖学图谱</td><td>富克斯、维萨里</td><td>精细木刻插图与文字并置，跨页图表与对照表成为科学出版常态。</td></tr>
+      <tr><td>17 世纪</td><td>公报与新闻纸雏形</td><td>欧洲各商贸城市</td><td>分栏排版出现，标题、正文、表格开始承担不同的信息层级。</td></tr>
+      <tr><td>18 世纪</td><td>现代衬线字体成型</td><td>加尔蒙、卡斯隆等字族传续</td><td>字体家族化、字号级数化，排版度量走向精密。</td></tr>
+      <tr><td>1790 年代</td><td>铅版浇铸（stereotyping）</td><td>英国、法国印刷所</td><td>整页可一次性铸成铅版，长版活件不再需要长期占用活字。</td></tr>
+      <tr><td>19 世纪</td><td>莱诺铸排机</td><td>默根塔勒</td><td>键盘操作、铜模自动成行，整行铅条一次浇成，“行”成为物理单位。</td></tr>
+      <tr><td>19 世纪末</td><td>莫诺铸排机</td><td>兰斯顿</td><td>逐字铸排，修正单字比整行重铸便宜，适合长表格与科技排版。</td></tr>
+      <tr><td>19 世纪末</td><td>网目照相版</td><td>纽约《每日写真报》</td><td>照片可上常规印刷机，图文混排的复杂度显著提高。</td></tr>
+      <tr><td>20 世纪初</td><td>未来主义 / 构成主义版面</td><td>马里内蒂、罗德琴科</td><td>文字本身成为图形，打破严格栏格，为自由版面开路。</td></tr>
+      <tr><td>1920—1930 年代</td><td>瑞士国际主义网格</td><td>米勒-布罗克曼等</td><td>先划分栏目与基线网格，再让各元素就位，秩序被严格量化<sup class="fn-ref" data-fn="grid"></sup>。</td></tr>
+      <tr><td>1930 年代</td><td>照相排字（一代机）</td><td>欧洲、日本光学厂</td><td>以光学字模代替铅字，为冷排与屏幕排版过渡。</td></tr>
+      <tr><td>1950—1960 年代</td><td>照相植字普及</td><td>莱特拉塞特等厂商</td><td>字面可缩放、字距可微调，表格栏宽不再受铅字粒约束。</td></tr>
+      <tr><td>1970—1980 年代</td><td>计算机辅助排版</td><td>TROFF、TeX、桌面出版</td><td>断行、分页、脚注、浮动表格全部由算法求解，作者可在屏幕上校样。</td></tr>
+      <tr><td>1990 年代至今</td><td>网页与分页媒体样式</td><td>W3C 规范与各浏览器引擎</td><td>盒模型成为新“字模”；脚注同页、跨页表等高级特性仍需脚本补齐<sup class="fn-ref" data-fn="csspm"></sup>。</td></tr>
+    </tbody>
+  </table>
+
+  <p>这张表在窄窗口下会占到两到三页：每一处切开都发生在表行之间，续页顶部先出现与正表相同的表头，题注写作「续表　表 1」。当页码从一位数变成两位数、把后面的整表往后挤时，正表和它的所有续表在同一次装箱里一起重算，不会出现有的片段已经翻页、有的片段还停在旧切开位置的情况。</p>
+
   <p>从泥活字到铅字条，再到屏幕上的行盒，排版的最小单位不断抽象，但目标始终未变：让读者忘记版面的存在，只专注于文字本身。下一次当你打印一份长文，看到页脚的页码与页底的脚注各就各位时，或许可以想起这背后绵延了近千年的装箱艺术。</p>
 
   <section class="fn-defs">
@@ -80,7 +122,7 @@
 <div id="modal" hidden>
   <div class="modal-box">
     <h2>编辑源文（HTML）</h2>
-    <p class="modal-tip">支持 h1 / h2 / p / blockquote / ul；脚注引用写作 <code>&lt;sup class="fn-ref" data-fn="键"&gt;&lt;/sup&gt;</code>，定义放在 <code>.fn-defs</code> 的 <code>li[data-fn]</code> 中。文内互见写作 <code>&lt;a class="xref" data-target="小节id"&gt;……第#页……&lt;/a&gt;</code>（# 会替换为真实页码），目标写在带 <code>id</code> 的 <code>h2</code> 上。</p>
+    <p class="modal-tip">支持 h1 / h2 / p / blockquote / ul / table；<code>table</code> 可带 <code>caption</code> 与 <code>thead</code>，只在行间断页，续页自动重排表头并标注「续表」。脚注引用写作 <code>&lt;sup class="fn-ref" data-fn="键"&gt;&lt;/sup&gt;</code>，定义放在 <code>.fn-defs</code> 的 <code>li[data-fn]</code> 中。文内互见写作 <code>&lt;a class="xref" data-target="小节id"&gt;……第#页……&lt;/a&gt;</code>（# 会替换为真实页码），目标写在带 <code>id</code> 的 <code>h2</code> 上。</p>
     <textarea id="src-editor" spellcheck="false"></textarea>
     <div class="modal-actions">
       <button id="btn-cancel" type="button">取消</button>
