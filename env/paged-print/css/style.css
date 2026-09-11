@@ -77,12 +77,30 @@ button.primary:hover { background: #1d4ed8; }
 .page-footer { bottom: 10px; padding-top: 6px; border-top: 1px solid #ddd; justify-content: center; }
 .page-footer .pf-num { letter-spacing: .05em; }
 
-.page-body { position: relative; overflow: hidden; }
+/* 版心：两栏时左右并排挤型；一栏退化为单一栏容器 */
+.page-body {
+  position: relative;
+  overflow: hidden;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+}
+.page-col {
+  flex: 0 0 auto;
+  min-width: 0;
+  /* 固定栏高 = contentH；box-sizing + overflow 双保险，
+   * 测量 / 渲染亚像素误差时以裁切兜底而不是把页脚顶出去 */
+  box-sizing: border-box;
+  max-height: 100%;
+  overflow: hidden;
+}
 .page-margin-notes {
   position: absolute;
   inset: 0;
   pointer-events: none;
 }
+/* 两栏时旁注挂在所属栏的外侧（左栏注在左、右栏注在右）；
+ * 一栏时沿用物理页码奇偶：偶数页左外侧、奇数页右外侧。 */
 .margin-note {
   position: absolute;
   margin: 0;

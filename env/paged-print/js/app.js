@@ -76,7 +76,7 @@ function extractMarginNotes(article) {
 function createMeasureArticle(geo) {
   const host = document.createElement('div')
   host.className = 'doc-flow measure-host'
-  host.style.width = geo.contentW + 'px'
+  host.style.width = geo.colW + 'px' // 两栏时按栏宽测量，行断与真实栏一致
   const article = document.createElement('article')
   article.innerHTML = getSource()
   host.appendChild(article)
@@ -169,7 +169,8 @@ function repaginate() {
   const hasNotes = srcTpl.content.querySelectorAll('span.mn[data-note]').length > 0
   geo = pageGeometry(previewEl.clientWidth - 32, hasNotes)
 
-  // 1. 目录条目恒为单行定高，目录占几页只取决于条目数，与正文页码无关，先量一次
+  // 1. 目录条目恒为单行定高，目录占几页只取决于条目数，与正文页码无关，先量一次。
+  //    目录本身始终一栏通栏排版（条目按整页版心宽测量）。
   const probe = createMeasureArticle(geo)
   const { tocTexts, targetIds } = probe
   let tocPageCount = 0
@@ -202,15 +203,19 @@ function repaginate() {
       ? measureMarginNotes(built.notes, geo.noteW)
       : new Map()
     const units = measureUnits(built.article)
-    const bodyPages = paginateUnits(units, geo.contentH, fnH, mnH)
+    const bodyPages = paginateUnits(units, geo.contentH, fnH, mnH, geo.cols)
 
+    /* 落页扫描：按文档顺序逐栏扫（左栏 → 右栏），标题只认第一次出现 */
     const headPage = built.tocTexts.map(() => 0)
     const pageById = new Map()
     bodyPages.forEach((pg, pi) => {
-      for (const u of pg.items) {
-        if (u.kind === 'block' && u.el.dataset && u.el.dataset.toc !== undefined) {
-          headPage[+u.el.dataset.toc] = pi
-          if (u.el.id) pageById.set(u.el.id, pi + tocPageCount + 1)
+      for (const col of pg.cols) {
+        for (const u of col.items) {
+          if (u.kind === 'block' && u.el.dataset && u.el.dataset.toc !== undefined) {
+            const ti = +u.el.dataset.toc
+            headPage[ti] = pi
+            if (u.el.id) pageById.set(u.el.id, pi + tocPageCount + 1)
+          }
         }
       }
     })
@@ -237,18 +242,20 @@ function repaginate() {
     )
   }
 
-  /* 逐页推导正文页眉的小节名：按装箱顺序扫每页单元，
-     取这一页上最后出现的 h2——即只要新小节已在本页起头，本页就算新小节；
-     h2 之前的引言页没有归属小节（右侧留空）。
+  /* 逐页推导正文页眉的小节名：按装箱顺序逐栏扫每页单元（左栏 → 右栏），
+     取这一页上最后出现的 h2——即只要新小节已在本页（任一栏）起头，
+     本页就算新小节；h2 之前的引言页没有归属小节（右侧留空）。
      增删段落 / 改变宽度后整盘重排，这里随之重算，页眉不会残留上一节。 */
   const h1 = article.querySelector('h1')
   const bookTitle = h1 ? h1.textContent : '未命名文档'
   const sectionHeads = []
   let currentSection = ''
   for (const pg of bodyPages) {
-    for (const u of pg.items) {
-      if (u.kind === 'block' && u.el.dataset && u.el.dataset.toc !== undefined) {
-        currentSection = u.el.textContent.trim()
+    for (const col of pg.cols) {
+      for (const u of col.items) {
+        if (u.kind === 'block' && u.el.dataset && u.el.dataset.toc !== undefined) {
+          currentSection = u.el.textContent.trim()
+        }
       }
     }
     sectionHeads.push(currentSection)
@@ -267,7 +274,7 @@ function repaginate() {
   pagesEl.replaceChildren(frag)
   host.remove()
 
-  statusEl.textContent = `共 ${allPages.length} 页（目录 ${tocPages.length} 页）· 版面宽 ${geo.W}px · 缩放窗口或修改内容后自动重排`
+  statusEl.textContent = `共 ${allPages.length} 页（目录 ${tocPages.length} 页）· ${geo.cols === 2 ? '每页两栏' : '每页一栏'} · 版面宽 ${geo.W}px · 缩放窗口或修改内容后自动重排`
 }
 
 /* ---------- 目录 / 互见点击 → 翻到目标页（导出的打印文档里则走原生锚点） ---------- */
