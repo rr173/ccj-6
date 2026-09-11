@@ -214,12 +214,29 @@ function repaginate() {
     )
   }
 
-  // 4. 渲染：目录页在前，正文页码接续编号
+  /* 逐页推导正文页眉的小节名：按装箱顺序扫每页单元，
+     取这一页上最后出现的 h2——即只要新小节已在本页起头，本页就算新小节；
+     h2 之前的引言页没有归属小节（右侧留空）。
+     增删段落 / 改变宽度后整盘重排，这里随之重算，页眉不会残留上一节。 */
   const h1 = article.querySelector('h1')
+  const bookTitle = h1 ? h1.textContent : '未命名文档'
+  const sectionHeads = []
+  let currentSection = ''
+  for (const pg of bodyPages) {
+    for (const u of pg.items) {
+      if (u.kind === 'block' && u.el.dataset && u.el.dataset.toc !== undefined) {
+        currentSection = u.el.textContent.trim()
+      }
+    }
+    sectionHeads.push(currentSection)
+  }
+
+  // 4. 渲染：目录页在前，正文页码接续编号
   const allPages = [...tocPages, ...bodyPages]
   const frag = renderPages(allPages, geo, {
-    title: h1 ? h1.textContent : '未命名文档',
-    subtitle: '自动分页 · 页码实时重排',
+    title: bookTitle,
+    tocCount: tocPages.length,
+    sectionHeads,
     defs,
     fnNum,
   })
@@ -309,7 +326,10 @@ async function buildPrintDocument() {
     '.page{box-shadow:none;margin:0 auto;break-after:page}',
     '.page:last-child{break-after:auto}',
   ].join('\n')
-  const title = (document.querySelector('#pages .page-header span') || {}).textContent || '打印预览'
+  const title =
+    (document.querySelector('#pages .page-header .ph-book') || {}).textContent ||
+    (document.querySelector('#pages .page-header .ph-right:not(:empty)') || {}).textContent ||
+    '打印预览'
   return '<!DOCTYPE html>\n<html lang="zh-CN">\n<head>\n<meta charset="utf-8">\n' +
     `<title>${title} - 打印预览</title>\n<style>\n${css}\n${extra}\n</style>\n</head>\n<body>\n` +
     pagesEl.outerHTML +

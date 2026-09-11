@@ -70,6 +70,10 @@ button.primary:hover { background: #1d4ed8; }
   pointer-events: none;
 }
 .page-header { top: 12px; padding-bottom: 6px; border-bottom: 1px solid #ddd; }
+.page-header.ph-toc { justify-content: center; }
+.page-header span { max-width: 70%; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.page-header .ph-left { text-align: left; }
+.page-header .ph-right { text-align: right; }
 .page-footer { bottom: 10px; padding-top: 6px; border-top: 1px solid #ddd; justify-content: center; }
 .page-footer .pf-num { letter-spacing: .05em; }
 

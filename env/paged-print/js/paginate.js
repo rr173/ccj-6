@@ -325,15 +325,35 @@ function renderPages(pages, geo, meta) {
     page.style.height = geo.H + 'px'
     page.style.padding = `${geo.mT}px ${geo.mX}px ${geo.mB}px`
 
+    /* 对开页眉：目录页只写「目录」；正文偶数页（左页）左外侧写书名、右侧留空，
+       奇数页（右页）左侧留空、右外侧写本页所属小节名。
+       归属小节由调用方从同一次分页结果逐页算好（meta.sectionHeads），
+       左右两侧同源一次渲染，落页变化时不会一边已换新节、一边还挂旧节。 */
     const header = document.createElement('header')
-    header.className = 'page-header'
     header.style.left = geo.mX + 'px'
     header.style.right = geo.mX + 'px'
-    const hTitle = document.createElement('span')
-    hTitle.textContent = meta.title
-    const hSide = document.createElement('span')
-    hSide.textContent = meta.subtitle || ''
-    header.append(hTitle, hSide)
+    if (pi < meta.tocCount) {
+      header.className = 'page-header ph-toc'
+      const hCenter = document.createElement('span')
+      hCenter.className = 'ph-center'
+      hCenter.textContent = '目录'
+      header.appendChild(hCenter)
+    } else {
+      const even = (pi + 1) % 2 === 0 // 以连续的物理页码定左右开
+      header.className = 'page-header ' + (even ? 'ph-even' : 'ph-odd')
+      const hLeft = document.createElement('span')
+      hLeft.className = 'ph-left'
+      const hRight = document.createElement('span')
+      hRight.className = 'ph-right'
+      if (even) {
+        hLeft.textContent = meta.title
+        hLeft.classList.add('ph-book')
+      } else {
+        hRight.textContent = meta.sectionHeads[pi - meta.tocCount] || ''
+        hRight.classList.add('ph-sec')
+      }
+      header.append(hLeft, hRight)
+    }
 
     const body = document.createElement('div')
     body.className = 'page-body doc-flow'
