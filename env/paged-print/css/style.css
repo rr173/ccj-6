@@ -115,6 +115,13 @@ button.primary:hover { background: #1d4ed8; }
 .margin-note.mn-left {
   border-right: 2px solid #93a4bd;
 }
+/* 续注：同一条旁注随被注句子跨到续栏（页）时，在续栏外侧再显示一次。
+ * 用更淡的边线与字色标明它是“同一条说明的延续”，不额外占高。 */
+.margin-note.mn-cont {
+  border-left-color: #c3ccd9;
+  border-right-color: #c3ccd9;
+  color: #8a93a0;
+}
 .margin-note::after {
   content: "";
   position: absolute;

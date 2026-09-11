@@ -179,27 +179,31 @@ function splitParagraph(p) {
     else kept.push(sp)
   }
 
-  /* 一个旁注只认它被注句子的第一条视觉行。行内元素跨行时会被拆成
-   * 两个带同一 data-mn-id 的空壳 / 续壳，续壳不再登记，避免跨栏重复。
-   * 注意整段只有一个视觉行时，Range 端点都在 .mn 内部，insertNode 会把
-   * 行块 .ln 放进 .mn 里面；此时旁注标记在 .ln 的祖先上而非后代，
-   * 因此先沿祖先链找最近的 [data-mn-id]，再并上后代里的壳。 */
-  const assignedNotes = new Set()
+  /* 一个旁注认它被注句子的视觉行：第一条视觉行为“锚点行”，其后仍属于
+   * 该句的视觉行为“续行”。句子跨栏（页）断开时——开头在左栏底、后半截
+   * 在右栏顶——锚点行所在栏挂原注，续行所在栏也要挂同一条注（续注），
+   * 否则读者在续栏看到半句话却找不到说明。
+   * 行内元素跨行时 DOM 形态不固定：有时 .ln 被放进 .mn 里面（旁注标记
+   * 在祖先上），有时 .mn 在 .ln 里面（标记在后代上），还可能留下空壳；
+   * 因此祖先链与后代都查，并要求该壳“有文字”才认。
+   * 整段只有一个视觉行时 .ln 在 .mn 内部，同样靠祖先链识别。 */
+  const anchored = new Set() // 已拿到锚点行的旁注 id
   for (const sp of kept) {
-    const ids = []
     const noteEls = [...sp.querySelectorAll('[data-mn-id]')]
     const ancestor = sp.closest && sp.closest('[data-mn-id]')
     if (ancestor) noteEls.unshift(ancestor)
-    for (const n of noteEls) {
+    const uniq = []
+    for (const n of noteEls) if (!uniq.includes(n)) uniq.push(n)
+
+    const anchorIds = [], contIds = []
+    for (const n of uniq) {
       const id = n.dataset.mnId
-      /* 只绑定该旁注“有文字”的第一个行内壳：跨视觉行时浏览器还会在续行
-       * 留一个同一 id 的空壳；不同旁注即使首行相同也要各自保留。 */
-      if (id && n.textContent.trim() !== '' && !assignedNotes.has(id)) {
-        assignedNotes.add(id)
-        ids.push(id)
-      }
+      if (!id || n.textContent.trim() === '') continue // 空壳不认
+      if (!anchored.has(id)) { anchored.add(id); anchorIds.push(id) }
+      else if (!contIds.includes(id)) contIds.push(id)
     }
-    if (ids.length) sp.dataset.mnIds = [...new Set(ids)].join(',')
+    if (anchorIds.length) sp.dataset.mnIds = [...new Set(anchorIds)].join(',')
+    if (contIds.length) sp.dataset.mnContIds = [...new Set(contIds)].join(',')
   }
   return kept
 }
@@ -399,6 +403,7 @@ function measureUnits(article) {
           tail: idx === total - 1 ? mb : 0,
           refs: fnKeys(sp),
           notes: (sp.dataset.mnIds || '').split(',').filter(Boolean),
+          contNotes: (sp.dataset.mnContIds || '').split(',').filter(Boolean),
           keepNext: false,
         })
       })
@@ -500,14 +505,25 @@ function paginateUnits(units, contentH, fnH, mnH = new Map(), colsN = 1) {
     }
 
     /* 计算一栏（可带候选单元）的正文占用与旁注纵向落位。
-     * 旁注脱离正文流、不增加行高，但必须与锚点同栏，且同栏多条旁注
+     * 旁注脱离正文流、不增加行高，但锚点注必须与首句同栏，且同栏多条旁注
      * 之间要相互错开；capText 为扣除整页共用脚注区后的栏正文可用高。
-     * side 为本栏在页上的位置（左 / 右），旁注挂该栏外侧。 */
+     * side 为本栏在页上的位置（左 / 右），旁注挂该栏外侧。
+     *
+     * 两类旁注：
+     *  - 锚点注（cont=false）：句子第一条视觉行所在栏，放不下要连同句子换栏；
+     *  - 续注（cont=true）：句子跨栏断开后，续行所在栏也显示同一条注。
+     *    同栏内同一 id 既是锚点又有续行时只留锚点；续注不驱动换栏，只贴在
+     *    续行旁，参与同栏碰撞消除（必要时让位于锚点注）。 */
     function columnLayout(items, side, extras, capText) {
       const all = items.concat(extras)
       let used = 0
       const countedTables = new Set()
       const wanted = []
+      const pushWanted = (id, cont, y) => {
+        const ex = wanted.find(n => n.id === id)
+        if (ex) { if (!cont) ex.cont = false } // 锚点优先于续注
+        else wanted.push({ id, cont, y })
+      }
       for (let idx = 0; idx < all.length; idx++) {
         const u = all[idx]
         const overhead = rowOverhead(u, all.slice(0, idx))
@@ -516,37 +532,75 @@ function paginateUnits(units, contentH, fnH, mnH = new Map(), colsN = 1) {
           used += overhead
         }
         for (const id of u.notes || []) {
-          if (!wanted.some(n => n.id === id)) {
-            wanted.push({ id, y: used + overhead + mnAnchorOffset(u) })
-          }
+          pushWanted(id, false, used + overhead + mnAnchorOffset(u))
+        }
+        for (const id of u.contNotes || []) {
+          pushWanted(id, true, used + overhead + mnAnchorOffset(u))
         }
         used += u.height + u.tail
       }
 
-      /* 先按锚点落下，再从上往下顺推；最后一条超出栏底时整簇上移。
-       * 双向错开：相邻底+缝 ≤ 下一条顶，避免后加的注塞进更早两条之间。 */
-      const layouts = wanted.map(({ id, y: anchorY }) => {
-        const h = mnHeightOf(id)
-        return { id, side, y: clamp(anchorY, 0, Math.max(0, capText - h)), h }
-      })
-      layouts.sort((a, b) => a.y - b.y ||
+      const place = w => {
+        const h = mnHeightOf(w.id)
+        return { id: w.id, cont: w.cont, h, side,
+                 y: clamp(w.y, 0, Math.max(0, capText - h)) }
+      }
+
+      /* 锚点注：先按锚点落下，再从上往下顺推；最后一条超出栏底时整簇上移。
+       * 双向错开：相邻底+缝 ≤ 下一条顶，避免后加的注塞进更早两条之间。
+       * 整簇比一栏还高时 optimal=false，调用方让锚点行换到新栏。 */
+      const anchors = wanted.filter(w => !w.cont).map(place)
+      anchors.sort((a, b) => a.y - b.y ||
         wanted.findIndex(w => w.id === a.id) - wanted.findIndex(w => w.id === b.id))
-      for (let k = 1; k < layouts.length; k++) {
-        const minY = layouts[k - 1].y + layouts[k - 1].h + MN_GAP
-        if (layouts[k].y < minY - EPS) layouts[k].y = minY
+      for (let k = 1; k < anchors.length; k++) {
+        const minY = anchors[k - 1].y + anchors[k - 1].h + MN_GAP
+        if (anchors[k].y < minY - EPS) anchors[k].y = minY
       }
       let optimal = true
-      if (layouts.length) {
-        const overflow = layouts[layouts.length - 1].y + layouts[layouts.length - 1].h - capText
-        if (overflow > EPS) {
-          for (const n of layouts) n.y -= overflow
-        }
-        if (layouts[0].y < -EPS) {
-          optimal = false // 整簇比一栏还高：锚点行应换到新栏；空栏强制从顶往下排
-          const lift = -layouts[0].y
-          for (const n of layouts) n.y += lift
+      if (anchors.length) {
+        const overflow = anchors[anchors.length - 1].y + anchors[anchors.length - 1].h - capText
+        if (overflow > EPS) for (const n of anchors) n.y -= overflow
+        if (anchors[0].y < -EPS) {
+          optimal = false
+          const lift = -anchors[0].y
+          for (const n of anchors) n.y += lift
         }
       }
+
+      /* 续注：贴各自的续行落下，只在锚点注（位置固定不动）与其它续注之间
+       * 避让；续注不参与 optimal。做法：按 y 顺序把每条续注压到“其上方
+       * 最近的遮挡物（锚点注或已落位续注）底 + 缝”之下；若最末条越过栏底，
+       * 只把续注簇整体上移（不牵动锚点注）。极端密度下续注可能与锚点贴紧，
+       * 但同一条说明在续栏始终可见。 */
+      const conts = wanted.filter(w => w.cont).map(place)
+      conts.sort((a, b) => a.y - b.y)
+      for (const nt of conts) {
+        let minY = 0
+        for (const fx of anchors) {
+          if (fx.y <= nt.y + EPS) minY = Math.max(minY, fx.y + fx.h + MN_GAP)
+        }
+        for (const other of conts) {
+          if (other === nt) break // 已按 y 排序，前面的都是上方续注
+          minY = Math.max(minY, other.y + other.h + MN_GAP)
+        }
+        if (nt.y < minY - EPS) nt.y = minY
+      }
+      if (conts.length) {
+        const overflow = conts[conts.length - 1].y + conts[conts.length - 1].h - capText
+        if (overflow > EPS) {
+          for (const nt of conts) nt.y = Math.max(0, nt.y - overflow)
+          // 上移后重新对锚点注与彼此让位一次，避免压到固定锚点
+          for (const nt of conts) {
+            let minY = 0
+            for (const fx of anchors) {
+              if (fx.y <= nt.y + EPS) minY = Math.max(minY, fx.y + fx.h + MN_GAP)
+            }
+            for (const other of conts) { if (other === nt) break; minY = Math.max(minY, other.y + other.h + MN_GAP) }
+            if (nt.y < minY - EPS) nt.y = minY
+          }
+        }
+      }
+      const layouts = anchors.concat(conts)
       return { used, layouts, optimal }
     }
 
@@ -826,13 +880,16 @@ function renderPages(pages, geo, meta) {
       }
       finishTable()
 
-      /* 旁注：两栏时跟着被注句子走——左栏的注排左栏外侧、右栏的注排
-       * 右栏外侧；一栏退化为按物理页码奇偶排外侧。注与锚点同行坐标。 */
+      /* 旁注：两栏时跟着被注句子走——句子（或其续行）在左栏，注排左栏
+       * 外侧；在右栏则排右栏外侧；句子从左栏底续到右栏顶时，同一条注在
+       * 两栏外侧各显示一次（右栏为弱化的续注 .mn-cont）。一栏退化为按
+       * 物理页码奇偶排外侧，跨页续注同理。注与所属行同行坐标。 */
       for (const n of col.notes || []) {
         if (!meta.notes || !meta.notes.has(n.id)) continue
         const side = two ? (colIdx === 0 ? 'left' : 'right') : (even ? 'left' : 'right')
         const aside = document.createElement('aside')
-        aside.className = 'margin-note ' + (side === 'left' ? 'mn-left' : 'mn-right')
+        aside.className = 'margin-note ' + (side === 'left' ? 'mn-left' : 'mn-right') +
+          (n.cont ? ' mn-cont' : '')
         aside.style.top = (geo.mT + n.y) + 'px'
         aside.style.width = geo.noteW + 'px'
         if (side === 'left') aside.style.left = MN_EDGE + 'px'
