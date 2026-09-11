@@ -225,21 +225,25 @@ function tableUnits(tbl) {
   const mt = parseFloat(cs.marginTop) || 0
   const mb = parseFloat(cs.marginBottom) || 0
 
-  /* 首片开销 = 表顶（含上外边距）到首根行上沿 */
-  const firstTop = headRows[0] || bodyRows[0]
-  const firstOverhead = mt + (firstTop ? firstTop.getBoundingClientRect().top
-    - tbl.getBoundingClientRect().top : 0)
+  /* 首片开销 = 表顶（含上外边距）到首根表体行上沿：
+   * 有表头 → 上边框 + 题注 + 全部表头行；无表头 → 上边框 + 题注。
+   * 注意必须取到“首根表体行上沿”，漏掉表头行会让首片实际渲染比计费高，
+   * 落到快写满的页上时片底被切掉。 */
+  const tblTop = tbl.getBoundingClientRect().top
+  const firstOverhead = mt + (headRows.length
+    ? headRows[headRows.length - 1].getBoundingClientRect().bottom - tblTop
+    : bodyRows[0].getBoundingClientRect().top - tblTop)
 
   /* 续片开销 = 表顶到首根续行上沿之间的高度：
-   * 有表头 → 「续表」题注 + 重排的表头行；无表头 → 只有「续表」题注。
+   * 有表头 → 「续表」题注 + 重排的全部表头行；无表头 → 只有「续表」题注。
    * 换上续页题注文本再量，加前缀可能让题注多占一行。 */
   const contOverhead = withContinuationCaption(tbl, capEl, () => {
+    const topNow = tbl.getBoundingClientRect().top
     if (headRows.length) {
-      return headRows[headRows.length - 1].getBoundingClientRect().bottom -
-        tbl.getBoundingClientRect().top
+      return headRows[headRows.length - 1].getBoundingClientRect().bottom - topNow
     }
     return bodyRows.length
-      ? bodyRows[0].getBoundingClientRect().top - tbl.getBoundingClientRect().top
+      ? bodyRows[0].getBoundingClientRect().top - topNow
       : 0
   })
 
@@ -341,28 +345,27 @@ function paginateUnits(units, contentH, fnH) {
   const fresh = (u, extra) =>
     u.refs.filter(k => !placedFn.has(k) && !fns.includes(k) && !(extra && extra.includes(k)))
 
-  /* 表行落在一页上的额外高度：该表本页第一次出现 → 首片开销
-   * （题注 + 表顶）；本页已有同表的行 → 续片开销（「续表」+ 重排表头）。
+  /* 表行落在一页上的额外高度，只在“一片的第一行”计一次：
+   * 该表本页第一行是整表首行 → 首片开销（题注 + 表头 + 表顶）；
+   * 是从上页续过来的首行 → 续片开销（「续表」+ 重排表头）；
+   * 本页已有同表的行（同一片继续）→ 0，行只占自身高度。
+   * 片内每一行都重复计续片开销会让每页严重装不满。
    * list 为该页已装单元；用于正式装箱、回退后重算与 keep 前瞻。 */
   function rowOverhead(u, list) {
     if (u.kind !== 'trow') return 0
     const onPage = list.some(x => x.kind === 'trow' && x.tbl === u.tbl)
-    return onPage ? u.tbl.contOverhead
-                  : (u.first ? u.tbl.firstOverhead : u.tbl.contOverhead)
+    if (onPage) return 0
+    return u.first ? u.tbl.firstOverhead : u.tbl.contOverhead
   }
 
   function rebuild() { // 回退行之后，按剩余单元重算脚注与可用高度
     fns = []
-    const seenTbl = new Set()
-    for (const u of items) {
-      for (const k of u.refs) if (!fns.includes(k)) fns.push(k)
-      if (u.kind === 'trow' && !seenTbl.has(u.tbl.id)) seenTbl.add(u.tbl.id)
-    }
+    for (const u of items) for (const k of u.refs) if (!fns.includes(k)) fns.push(k)
     let used = 0
     const counted = new Set()
     for (const u of items) {
       used += u.height + u.tail
-      if (u.kind === 'trow' && !counted.has(u.tbl.id)) {
+      if (u.kind === 'trow' && !counted.has(u.tbl.id)) { // 每张表本页只在首行计一次片开销
         counted.add(u.tbl.id)
         used += u.first ? u.tbl.firstOverhead : u.tbl.contOverhead
       }

@@ -110,6 +110,7 @@ button.primary:hover { background: #1d4ed8; }
   margin: 0 0 14px;
   font-size: 14px;
   line-height: 1.6;
+  table-layout: fixed;   /* 列宽以 colgroup 为准，与测量端的固定布局逐行等高 */
 }
 .doc-table caption {
   caption-side: top;
