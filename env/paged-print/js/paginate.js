@@ -468,29 +468,30 @@ function paginateUnits(units, contentH, fnH, mnH = new Map()) {
     }
     used += allFns.length ? FN_SEP_H + refsH(allFns) : 0
 
-    const layouts = []
-    let optimal = true
-    for (let n = 0; n < wanted.length; n++) {
-      const { id, y: anchorY } = wanted[n]
+    /* 先按锚点落下，再从上往下顺推；最后一条超出页底时整簇上移。
+     * 旧判断只看「注顶是否进入上一条底」，后加的注会被塞进更早两条之间，
+     * 仍压住上面那条。双向错开：相邻底+缝 ≤ 下一条顶。 */
+    const layouts = wanted.map(({ id, y: anchorY }) => {
       const h = mnHeightOf(id)
-      let y = Math.min(anchorY, Math.max(0, contentH - h))
-
-      /* 自下而上错行：与任何更早的旁注冲突都继续上移。
-       * 只看上一条时，被上移后的第二条仍可能撞到第一条。 */
-      for (let pass = 0; pass < n + 1; pass++) {
-        let hit = -1
-        for (let k = 0; k < n; k++) {
-          const prev = layouts[k]
-          if (y < prev.y + prev.h + MN_GAP - EPS) hit = k
-        }
-        if (hit < 0) break
-        y = layouts[hit].y - h - MN_GAP
+      return { id, y: clamp(anchorY, 0, Math.max(0, contentH - h)), h }
+    })
+    layouts.sort((a, b) => a.y - b.y ||
+      wanted.findIndex(w => w.id === a.id) - wanted.findIndex(w => w.id === b.id))
+    for (let i = 1; i < layouts.length; i++) {
+      const minY = layouts[i - 1].y + layouts[i - 1].h + MN_GAP
+      if (layouts[i].y < minY - EPS) layouts[i].y = minY
+    }
+    let optimal = true
+    if (layouts.length) {
+      const overflow = layouts[layouts.length - 1].y + layouts[layouts.length - 1].h - contentH
+      if (overflow > EPS) {
+        for (const n of layouts) n.y -= overflow
       }
-      if (y < 0 || y + h > contentH + EPS) {
-        optimal = false // 顶 / 底放不下：锚点行应换到新页；空页强制容纳极端长注
-        y = clamp(y, 0, Math.max(0, contentH - h))
+      if (layouts[0].y < -EPS) {
+        optimal = false // 整簇比一页还高：锚点行应换到新页；空页强制从顶往下排
+        const lift = -layouts[0].y
+        for (const n of layouts) n.y += lift
       }
-      layouts.push({ id, y, h })
     }
     for (const id of extraNotes) {
       if (!layouts.some(n => n.id === id) && !wanted.some(n => n.id === id)) {
