@@ -164,11 +164,22 @@ function splitParagraph(p) {
     spans.unshift(span)
   }
 
-  /* 行界恰好切开上标引用时会留下空壳（还会渲染出空的 "[]"），
-   * 丢掉空壳，让脚注只跟随真正带编号的那一行 */
+  /* 行界恰好落在行内标记上时会留下空壳——脚注引用空壳会渲染出空的 "[]"；
+   * 索引条目里页码 <a> 是 nowrap 整块，正常断行不会切进锚点，但 Range 抽取
+   * 在“逗号｜锚点”这类边界上可能把数字整体归入下一行而在本行留下空壳。
+   * 丢掉空壳：数字（或编号）只跟随真正带文本的那条视觉行。
+   * 仅对索引条目做逗号清理，避免误伤普通正文。 */
+  const inIndex = spans.some(sp => sp.closest && sp.closest('.index-entry'))
   for (const sp of spans) {
-    for (const s of sp.querySelectorAll('.fn-ref')) {
+    for (const s of sp.querySelectorAll('.fn-ref, .index-pg')) {
       if (s.textContent === '') s.remove()
+    }
+    if (inIndex) {
+      /* 删壳后可能留下行首孤立逗号（“，，5”→“，5”；“，”→“”） */
+      sp.innerHTML = sp.innerHTML
+        .replace(/，(\s*，)+/g, '，')
+        .replace(/^\s*，+/, '')
+        .replace(/，\s*$/, '')
     }
   }
 
@@ -393,6 +404,7 @@ function measureUnits(article) {
       const mb = parseFloat(cs.marginBottom) || 0
       const total = spans.length
       spans.forEach((sp, idx) => {
+        if (idx === 0) sp.classList.add('ln-first') // 首条视觉行（供悬挂缩进等样式区分）
         units.push({
           kind: 'line',
           el: sp,
@@ -765,11 +777,19 @@ function renderPages(pages, geo, meta) {
     const header = document.createElement('header')
     header.style.left = padL + 'px'
     header.style.right = padR + 'px'
+    const idxCount = meta.indexCount || 0
+    const bodyEnd = total - idxCount // 索引页从该物理下标开始
     if (pi < meta.tocCount) {
       header.className = 'page-header ph-toc'
       const hCenter = document.createElement('span')
       hCenter.className = 'ph-center'
       hCenter.textContent = '目录'
+      header.appendChild(hCenter)
+    } else if (pi >= bodyEnd) {
+      header.className = 'page-header ph-toc'
+      const hCenter = document.createElement('span')
+      hCenter.className = 'ph-center'
+      hCenter.textContent = '索引'
       header.appendChild(hCenter)
     } else {
       header.className = 'page-header ' + (even ? 'ph-even' : 'ph-odd')

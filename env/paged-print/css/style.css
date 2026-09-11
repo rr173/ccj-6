@@ -248,6 +248,46 @@ button.primary:hover { background: #1d4ed8; }
 }
 .toc-entry .toc-pg { flex: none; font-variant-numeric: tabular-nums; }
 
+/* ============ 书末索引 ============ */
+.doc-flow .index-title { text-align: center; }
+.doc-flow h2.index-group {
+  font-size: 16px;
+  margin: 14px 0 6px;
+  padding-top: 6px;
+  color: var(--muted);
+  border-bottom: 1px solid #e3e8ef;
+}
+.doc-flow h2.index-group:first-of-type { margin-top: 0; }
+.doc-flow .index-entry {
+  /* 悬挂缩进由切出的视觉行（.ln）各自承担：整个条目统一左缩进 2em，
+   * 只有首行用负 text-indent 回到最左。必须落在 .ln 上——切行后每个
+   * 视觉行都是独立块，写在 <p> 上的 text-indent 只会作用于第一行块，
+   * padding 也不会传进 .ln 的内容盒。 */
+  margin: 0 0 4px;
+  padding-left: 0;
+  text-indent: 0;
+  text-align: left;
+}
+.doc-flow .index-entry .ln {
+  padding-left: 2em;
+}
+.doc-flow .index-entry .ln-first {
+  text-indent: -2em;
+}
+.index-term {
+  margin-right: 0.4em;
+  font-weight: 600;
+}
+.doc-flow .index-entry a.index-pg {
+  color: var(--accent);
+  text-decoration: none;
+  font-variant-numeric: tabular-nums;
+  /* 页码是不可分割的整体：一行放不下时整个页码（连同前导逗号）
+   * 移到下一行，绝不会在栏界 / 行界被切成看不见的半截 */
+  white-space: nowrap;
+}
+.doc-flow .index-entry a.index-pg:hover { text-decoration: underline; }
+
 /* ============ 隐藏测量容器 ============ */
 .measure-host {
   position: absolute;

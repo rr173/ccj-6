@@ -55,6 +55,149 @@ function buildTocUnits(texts, headPage, offset, geo) {
   return units
 }
 
+/* ---------- 书末索引 ----------
+ * 源文里被 <span class="idx" data-term="规范名">词</span> 标记的词收进索引。
+ * 每个词出现过的物理页码在最终正文分页结果里逐栏扫描得出（同页多次出现
+ * 只写一个页码，升序）；按字头分组：中文按拼音首字声母（取该音节一个常用
+ * 字为锚点，用 zh 排序比较归组），拉丁词按首字母归入 A–Z，其余归「其他」。
+ * 索引自身一栏通栏、独占页排在正文之后，不占正文页码。
+ */
+const IDX_PINYIN_ANCHORS = [
+  ['A', '啊'], ['B', '巴'], ['C', '擦'], ['D', '搭'], ['E', '蛾'],
+  ['F', '发'], ['G', '噶'], ['H', '哈'], ['J', '击'], ['K', '喀'],
+  ['L', '拉'], ['M', '妈'], ['N', '拿'], ['O', '哦'], ['P', '趴'],
+  ['Q', '七'], ['R', '然'], ['S', '撒'], ['T', '他'], ['W', '挖'],
+  ['X', '西'], ['Y', '压'], ['Z', '匝'],
+]
+const IDX_COLLATOR = new Intl.Collator('zh-CN-u-co-pinyin')
+const IDX_CJK = /[一-鿿㐀-䶿]/
+const IDX_LATIN = /[A-Za-z]/
+
+function indexLetterOf(term) {
+  const ch = term.trim()[0] || ''
+  if (IDX_LATIN.test(ch)) return ch.toUpperCase()
+  if (IDX_CJK.test(ch)) {
+    let letter = 'Z'
+    for (const [l, anchor] of IDX_PINYIN_ANCHORS) {
+      if (IDX_COLLATOR.compare(ch, anchor) < 0) break
+      letter = l
+    }
+    return letter
+  }
+  return '#'
+}
+
+/* 从正文分页结果逐栏（左栏 → 右栏）扫描索引标记：
+ * 行单元可能在视觉行界被切开，标记被克隆成两个半截（各带相同 data-idx-id）；
+ * 用 id 去重，每个标记只认它“起始”的那一页（扫描顺序里第一次出现的页），
+ * 这样一个词被行界劈成两半时只计起始页、且用切行前固化的完整词目计名。
+ * 页码为物理页码（目录 + 正文相对页）。同一页出现多次只记一次、自然升序。 */
+function collectIndexEntries(bodyPages, tocCount) {
+  const pages = new Map() // 规范词条 → 物理页码数组
+  const seenIds = new Set()
+  const pushTerm = (term, physPage) => {
+    if (!term) return
+    let arr = pages.get(term)
+    if (!arr) { arr = []; pages.set(term, arr) }
+    if (!arr.includes(physPage)) arr.push(physPage)
+  }
+  bodyPages.forEach((pg, pi) => {
+    const physPage = tocCount + pi + 1
+    for (const col of pg.cols) {
+      for (const u of col.items) {
+        const root = u.el
+        if (!root || !root.querySelectorAll) continue
+        for (const el of root.querySelectorAll('.idx')) {
+          const id = el.dataset.idxId
+          if (id) {
+            if (seenIds.has(id)) continue
+            seenIds.add(id)
+          }
+          pushTerm(el.dataset.term || el.textContent.trim(), physPage)
+        }
+      }
+    }
+  })
+  return [...pages].map(([term, locs]) => ({ term, locs }))
+}
+
+/* 按字头分组排序：组序 A–Z 再「其他」；组内按拼音排序，同形以词条本身兜底 */
+function groupIndexEntries(entries) {
+  const groups = new Map()
+  for (const e of entries) {
+    const letter = indexLetterOf(e.term)
+    if (!groups.has(letter)) groups.set(letter, [])
+    groups.get(letter).push(e)
+  }
+  const rank = l => (l === '#' ? 27 : l.charCodeAt(0) - 64)
+  return [...groups]
+    .sort((a, b) => rank(a[0]) - rank(b[0]))
+    .map(([letter, items]) => ({
+      letter,
+      entries: items.sort((a, b) =>
+        IDX_COLLATOR.compare(a.term, b.term) ||
+        (a.term < b.term ? -1 : a.term > b.term ? 1 : 0)),
+    }))
+}
+
+/* 构建索引装箱单元：h1「索引」→ 每组一个 h2 字头 + 若干条目整体块。
+ * 条目内部由引擎按通栏宽自然断行，页码是 nowrap 的整块：一行放不下时
+ * 整个页码连同前导逗号移到下一行（悬挂缩进），绝不会被切成看不见的半截。 */
+function buildIndexUnits(entries, geo) {
+  const host = document.createElement('div')
+  host.className = 'doc-flow measure-host'
+  host.style.width = geo.contentW + 'px'
+  const box = document.createElement('div')
+
+  const title = document.createElement('h1')
+  title.className = 'index-title'
+  title.textContent = '索引'
+  box.appendChild(title)
+
+  for (const g of groupIndexEntries(entries)) {
+    const h = document.createElement('h2')
+    h.className = 'index-group'
+    h.textContent = g.letter === '#' ? '其他' : g.letter
+    box.appendChild(h)
+
+    for (const e of g.entries) {
+      const d = document.createElement('p')
+      d.className = 'index-entry'
+      const term = document.createElement('span')
+      term.className = 'index-term'
+      term.textContent = e.term
+      d.appendChild(term)
+      e.locs.forEach((p, i) => {
+        if (i > 0) d.appendChild(document.createTextNode('，'))
+        const a = document.createElement('a')
+        a.className = 'index-pg'
+        a.href = '#p' + p
+        a.textContent = String(p)
+        d.appendChild(a)
+      })
+      box.appendChild(d)
+    }
+  }
+
+  host.appendChild(box)
+  document.body.appendChild(host)
+  const units = measureUnits(box)
+  host.remove() // 元素已脱离文档，渲染时再搬入页面
+  return units
+}
+
+/* 测量前给每个索引标记编号并固化规范名：
+ *  - 编号让“一个词在视觉行界被切成两个半截克隆”时仍能认出是同一次出现，
+ *    页码只认它起始的那一页（第一次出现的页），不会跨页重复计数；
+ *  - 规范名在切行前固化，半截克隆也带着完整词条，不会拿“雕版”当词目。 */
+function tagIndexMarkers(article) {
+  let seq = 0
+  article.querySelectorAll('span.idx').forEach(el => {
+    if (!el.dataset.term) el.dataset.term = el.textContent.trim()
+    el.dataset.idxId = 'ix' + (++seq)
+  })
+}
+
 /* ---------- 源文克隆：提取脚注、旁注、编号、目录目标 ---------- */
 function extractMarginNotes(article) {
   const notes = new Map()
@@ -98,6 +241,8 @@ function createMeasureArticle(geo) {
     if (!fnNum.has(k)) fnNum.set(k, ++n)
     s.textContent = fnNum.get(k)
   })
+
+  tagIndexMarkers(article) // 在切行之前给索引标记编号、固化规范名
 
   const tocTexts = []
   const targetIds = new Set()
@@ -261,11 +406,26 @@ function repaginate() {
     sectionHeads.push(currentSection)
   }
 
-  // 4. 渲染：目录页在前，正文页码接续编号
-  const allPages = [...tocPages, ...bodyPages]
+  // 4. 书末索引：词条与页码全部取自上面这份最终正文分页，与文内互见同源。
+  //    索引排在正文之后、自身占页，不改变正文落页，因此正文页码无需回推；
+  //    任何内容 / 尺寸变化都会让正文整盘重排，索引词条组成与页码随之重算，
+  //    最终与目录、正文在同一次 replaceChildren 中原子替换，不会新旧页码混排。
+  const indexEntries = collectIndexEntries(bodyPages, tocPages.length)
+  let indexPages = []
+  if (indexEntries.length) {
+    indexPages = paginateUnits(
+      buildIndexUnits(indexEntries, geo),
+      geo.contentH,
+      new Map()
+    )
+  }
+
+  // 5. 渲染：目录页在前、正文居中、索引页压卷，页码连续编号
+  const allPages = [...tocPages, ...bodyPages, ...indexPages]
   const frag = renderPages(allPages, geo, {
     title: bookTitle,
     tocCount: tocPages.length,
+    indexCount: indexPages.length,
     sectionHeads,
     defs,
     notes,
@@ -274,12 +434,17 @@ function repaginate() {
   pagesEl.replaceChildren(frag)
   host.remove()
 
-  statusEl.textContent = `共 ${allPages.length} 页（目录 ${tocPages.length} 页）· ${geo.cols === 2 ? '每页两栏' : '每页一栏'} · 版面宽 ${geo.W}px · 缩放窗口或修改内容后自动重排`
+  const parts = [
+    `共 ${allPages.length} 页（目录 ${tocPages.length} 页`,
+    indexPages.length ? `、索引 ${indexPages.length} 页` : '',
+    `）· ${geo.cols === 2 ? '每页两栏' : '每页一栏'} · 版面宽 ${geo.W}px · 缩放窗口或修改内容后自动重排`,
+  ]
+  statusEl.textContent = parts.join('')
 }
 
 /* ---------- 目录 / 互见点击 → 翻到目标页（导出的打印文档里则走原生锚点） ---------- */
 pagesEl.addEventListener('click', e => {
-  const a = e.target.closest('.toc-entry a[href^="#p"], a.xref[href^="#p"]')
+  const a = e.target.closest('.toc-entry a[href^="#p"], a.xref[href^="#p"], a.index-pg[href^="#p"]')
   if (!a) return
   e.preventDefault()
   const target = document.getElementById(a.getAttribute('href').slice(1))
