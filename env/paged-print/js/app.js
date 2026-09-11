@@ -55,7 +55,24 @@ function buildTocUnits(texts, headPage, offset, geo) {
   return units
 }
 
-/* ---------- 源文克隆：提取脚注、编号、目录目标 ---------- */
+/* ---------- 源文克隆：提取脚注、旁注、编号、目录目标 ---------- */
+function extractMarginNotes(article) {
+  const notes = new Map()
+  let seq = 0
+  article.querySelectorAll('span.mn[data-note]').forEach(el => {
+    const html = el.getAttribute('data-note') || ''
+    if (!html.trim()) {
+      el.removeAttribute('data-note')
+      return
+    }
+    const id = 'mn' + (++seq)
+    el.dataset.mnId = id
+    el.removeAttribute('data-note')
+    notes.set(id, html)
+  })
+  return notes
+}
+
 function createMeasureArticle(geo) {
   const host = document.createElement('div')
   host.className = 'doc-flow measure-host'
@@ -64,6 +81,8 @@ function createMeasureArticle(geo) {
   article.innerHTML = getSource()
   host.appendChild(article)
   document.body.appendChild(host)
+
+  const notes = extractMarginNotes(article)
 
   const defs = new Map()
   const defSec = article.querySelector('.fn-defs')
@@ -90,7 +109,7 @@ function createMeasureArticle(geo) {
     if (h.id) targetIds.add(h.id)
   })
 
-  return { host, article, defs, fnNum, tocTexts, targetIds }
+  return { host, article, defs, notes, fnNum, tocTexts, targetIds }
 }
 
 /* ---------- 文内互见 ----------
@@ -147,7 +166,8 @@ function fillCrossReferences(article, labels, targetIds) {
 
 /* ---------- 重新分页（唯一的重排入口） ---------- */
 function repaginate() {
-  geo = pageGeometry(previewEl.clientWidth - 32)
+  const hasNotes = srcTpl.content.querySelectorAll('span.mn[data-note]').length > 0
+  geo = pageGeometry(previewEl.clientWidth - 32, hasNotes)
 
   // 1. 目录条目恒为单行定高，目录占几页只取决于条目数，与正文页码无关，先量一次
   const probe = createMeasureArticle(geo)
@@ -178,8 +198,11 @@ function repaginate() {
     const xrefs = fillCrossReferences(built.article, labels, built.targetIds)
 
     const fnH = measureFootnotes(built.defs, geo.contentW, built.fnNum)
+    const mnH = geo.noteW > 0
+      ? measureMarginNotes(built.notes, geo.noteW)
+      : new Map()
     const units = measureUnits(built.article)
-    const bodyPages = paginateUnits(units, geo.contentH, fnH)
+    const bodyPages = paginateUnits(units, geo.contentH, fnH, mnH)
 
     const headPage = built.tocTexts.map(() => 0)
     const pageById = new Map()
@@ -202,7 +225,7 @@ function repaginate() {
     labels = nextLabels
   }
 
-  const { host, article, defs, fnNum, bodyPages, headPage } = laid
+  const { host, article, defs, notes, fnNum, bodyPages, headPage } = laid
 
   // 3. 目录条目填入最终页码后再装箱（条目高度与页码位数无关，页数仍等于 tocPageCount）
   let tocPages = []
@@ -238,6 +261,7 @@ function repaginate() {
     tocCount: tocPages.length,
     sectionHeads,
     defs,
+    notes,
     fnNum,
   })
   pagesEl.replaceChildren(frag)

@@ -78,6 +78,39 @@ button.primary:hover { background: #1d4ed8; }
 .page-footer .pf-num { letter-spacing: .05em; }
 
 .page-body { position: relative; overflow: hidden; }
+.page-margin-notes {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+.margin-note {
+  position: absolute;
+  margin: 0;
+  font: 11px/1.55 -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  color: #5b6472;
+  text-align: left;
+}
+.margin-note.mn-right {
+  border-left: 2px solid #93a4bd;
+  padding: 1px 0;
+}
+.margin-note.mn-left {
+  border-right: 2px solid #93a4bd;
+}
+.margin-note::after {
+  content: "";
+  position: absolute;
+  top: 6px;
+  width: 6px;
+  border-top: 1px solid #93a4bd;
+}
+.margin-note.mn-right::after { right: 100%; }
+.margin-note.mn-left::after { left: 100%; }
+.measure-host.margin-notes .margin-note {
+  position: static;
+  width: auto !important;
+}
+.measure-host.margin-notes .margin-note::after { content: none; }
 
 /* ============ 正文排版（测量容器与页面共用，保证行断一致） ============ */
 .doc-flow {

@@ -17,17 +17,34 @@ const A4_RATIO = 297 / 210
 const FN_SEP_H = 20   // 脚注区分隔线的预留高度(px)
 const KEEP_LINES = 2  // 标题后至少跟随的正文行数
 const EPS = 0.5       // 高度比较容差(px)
+const MN_GAP = 8      // 同页两条旁注之间的最小垂直间距(px)
+const MN_EDGE = 10    // 旁注到纸张外缘 / 版心外侧的间距(px)
 
 function clamp(v, a, b) { return Math.max(a, Math.min(b, v)) }
 
-/* 根据可用宽度计算页面几何（保持 A4 比例，宽度随窗口缩放） */
-function pageGeometry(availWidth) {
+/* 根据可用宽度计算页面几何（保持 A4 比例，宽度随窗口缩放）。
+ * 有旁注时使用不对称页边：内侧留给装订，外侧加宽放旁注。
+ * 渲染时按物理页码奇偶把 mOuter 分到左 / 右。 */
+function pageGeometry(availWidth, hasMarginNotes = false) {
   const W = clamp(Math.floor(availWidth), 360, 794)
   const H = Math.round(W * A4_RATIO)
-  const mX = clamp(Math.round(W * 0.085), 34, 56)
   const mT = clamp(Math.round(W * 0.080), 42, 64)
   const mB = clamp(Math.round(W * 0.075), 42, 60)
-  return { W, H, mX, mT, mB, contentW: W - mX * 2, contentH: H - mT - mB }
+  let mX, mInner, mOuter
+  if (hasMarginNotes) {
+    mInner = clamp(Math.round(W * 0.055), 28, 48)
+    mOuter = clamp(Math.round(W * 0.155), 92, 116)
+    mX = mInner
+  } else {
+    mX = clamp(Math.round(W * 0.085), 34, 56)
+    mInner = mOuter = mX
+  }
+  return {
+    W, H, mX, mT, mB, mInner, mOuter,
+    noteW: Math.max(0, mOuter - MN_EDGE * 2),
+    contentW: W - mInner - mOuter,
+    contentH: H - mT - mB,
+  }
 }
 
 /* ---------- 文本位置工具 ---------- */
@@ -124,6 +141,23 @@ function splitParagraph(p) {
     if (sp.textContent.trim() === '' && !sp.querySelector('img,br')) sp.remove()
     else kept.push(sp)
   }
+
+  /* 一个旁注只认它被注句子的第一条视觉行。行内元素跨行时会被拆成
+   * 两个带同一 data-mn-id 的空壳 / 续壳，续壳不再登记，避免跨页重复。 */
+  const assignedNotes = new Set()
+  for (const sp of kept) {
+    const ids = []
+    for (const n of sp.querySelectorAll('[data-mn-id]')) {
+      const id = n.dataset.mnId
+      /* 只绑定该旁注“有文字”的第一个行内壳：跨视觉行时浏览器还会在续行
+       * 留一个同一 id 的空壳；不同旁注即使首行相同也要各自保留。 */
+      if (id && n.textContent.trim() !== '' && !assignedNotes.has(id)) {
+        assignedNotes.add(id)
+        ids.push(id)
+      }
+    }
+    if (ids.length) sp.dataset.mnIds = [...new Set(ids)].join(',')
+  }
   return kept
 }
 
@@ -137,6 +171,29 @@ function fnKeys(el) {
   return keys
 }
 
+function mnKeys(el) {
+  const nodes = el.hasAttribute && el.hasAttribute('data-mn-ids')
+    ? [el]
+    : (el.querySelectorAll ? el.querySelectorAll('[data-mn-id]') : [])
+  return [...new Set(Array.from(nodes).flatMap(n =>
+    (n.dataset.mnIds || n.dataset.mnId || '').split(',').filter(Boolean)
+  ))]
+}
+
+/* 旁注锚点在单元内的纵向偏移；视觉行单元本身就是锚点行。
+ * 用 TreeWalker 找到最深的行内标记，避免外层元素也带属性时取偏。 */
+function mnAnchorOffset(unit) {
+  if (unit.kind === 'line') return 0
+  let node = null
+  const walker = document.createTreeWalker(unit.el, NodeFilter.SHOW_ELEMENT)
+  while (walker.nextNode()) {
+    if (walker.currentNode.dataset.mnId) { node = walker.currentNode; break }
+  }
+  if (!node) return 0
+  const top = unit.el.getBoundingClientRect().top
+  return Math.max(0, node.getBoundingClientRect().top - top)
+}
+
 function blockUnit(el) {
   const cs = getComputedStyle(el)
   return {
@@ -145,6 +202,7 @@ function blockUnit(el) {
     height: el.getBoundingClientRect().height,
     tail: parseFloat(cs.marginBottom) || 0,
     refs: fnKeys(el),
+    notes: mnKeys(el),
     keepNext: /^H[1-6]$/.test(el.tagName),
   }
 }
@@ -152,8 +210,9 @@ function blockUnit(el) {
 /* ---------- 跨页表 ----------
  * 表格按行展开为 trow 单元，装箱时只在行间断开。每个表的描述信息
  * （表头行、列宽、首片/续片额外开销）在测量阶段一次量好：
- *  - 首片开销：表顶边到首行上沿（题注 + 上边框）
- *  - 续片开销：题注（无表头的表写「续表」）或重排的表头 + 上边框
+ *  - 首片开销：表顶边到首根表体行上沿（上外边距 + 题注 + 全部表头行）
+ *  - 续片开销：「续表」题注（无表头的表只有它）+ 重排的全部表头行
+ * 两种开销都只在“一片的第一行”计一次，片内后续行只占自身行高。
  * 切开位置与续片落页都只存在于当次装箱结果里，重排时整盘作废重算。
  * 列宽在测量时读出并写入 <colgroup> + table-layout:fixed，保证正表与
  * 各续表列宽完全一致，不会因各页行数不同而重新分配列宽。
@@ -265,6 +324,7 @@ function tableUnits(tbl) {
       height: tr.getBoundingClientRect().height,
       tail: last ? mb : 0,
       refs: fnKeys(tr),
+      notes: mnKeys(tr),
       keepNext: false,
     }
   })
@@ -293,6 +353,7 @@ function measureUnits(article) {
           height: sp.getBoundingClientRect().height,
           tail: idx === total - 1 ? mb : 0,
           refs: fnKeys(sp),
+          notes: (sp.dataset.mnIds || '').split(',').filter(Boolean),
           keepNext: false,
         })
       })
@@ -328,20 +389,39 @@ function measureFootnotes(defs, contentW, fnNum) {
   return map
 }
 
+/* 在与旁注栏等宽的隐藏容器里测量每条旁注的高度 */
+function measureMarginNotes(notes, noteW) {
+  const host = document.createElement('div')
+  host.className = 'measure-host margin-notes'
+  host.style.width = noteW + 'px'
+  document.body.appendChild(host)
+  const map = new Map()
+  for (const [id, html] of notes) {
+    const aside = document.createElement('aside')
+    aside.className = 'margin-note'
+    aside.innerHTML = html
+    host.appendChild(aside)
+    map.set(id, aside.getBoundingClientRect().height)
+  }
+  host.remove()
+  return map
+}
+
 /* ---------- 装箱 ----------
  * 贪心逐页填充；脚注高度随引用行即时扣减；
  * 页尾断段时做孤行/寡行回退；标题做 keep-with-next 前瞻；
  * 表行在页界处只做行间断行：本页已出现过该表则续片带表头开销，
  * 没出现过则首片带题注/表顶开销。
  */
-function paginateUnits(units, contentH, fnH) {
+function paginateUnits(units, contentH, fnH, mnH = new Map()) {
   const pages = []
   const placedFn = new Set()   // 已落在之前页的脚注
-  let items = [], fns = [], i = 0
+  let items = [], fns = [], notes = [], i = 0
   let space = contentH
 
   const fnHeightOf = k => fnH.get(k) || 0
   const refsH = keys => keys.reduce((s, k) => s + fnHeightOf(k), 0)
+  const mnHeightOf = k => mnH.get(k) || 0
   const fresh = (u, extra) =>
     u.refs.filter(k => !placedFn.has(k) && !fns.includes(k) && !(extra && extra.includes(k)))
 
@@ -358,23 +438,82 @@ function paginateUnits(units, contentH, fnH) {
     return u.first ? u.tbl.firstOverhead : u.tbl.contOverhead
   }
 
-  function rebuild() { // 回退行之后，按剩余单元重算脚注与可用高度
-    fns = []
-    for (const u of items) for (const k of u.refs) if (!fns.includes(k)) fns.push(k)
+  /* 计算一页（可带候选单元）的正文占用与旁注纵向落位。
+   * 旁注是脱离正文流的边栏，不增加正文行高；但它必须与锚点同页，
+   * 且同页多条旁注之间要相互错开，因此这里返回布局是否放得下。 */
+  function pageLayout(list = items, extraUnits = [], extraFns = [], extraNotes = []) {
+    const all = list.concat(extraUnits)
+    const allFns = []
+    for (const u of all) {
+      for (const k of u.refs) if (!allFns.includes(k)) allFns.push(k)
+    }
+    for (const k of extraFns) if (!allFns.includes(k)) allFns.push(k)
+
     let used = 0
-    const counted = new Set()
-    for (const u of items) {
+    const countedTables = new Set()
+    const wanted = []
+    for (let idx = 0; idx < all.length; idx++) {
+      const u = all[idx]
+      const overhead = rowOverhead(u, all.slice(0, idx))
+      if (u.kind === 'trow' && !countedTables.has(u.tbl.id)) {
+        countedTables.add(u.tbl.id)
+        used += overhead
+      }
+      for (const id of u.notes || []) {
+        if (!wanted.some(n => n.id === id)) {
+          wanted.push({ id, y: used + overhead + mnAnchorOffset(u) })
+        }
+      }
       used += u.height + u.tail
-      if (u.kind === 'trow' && !counted.has(u.tbl.id)) { // 每张表本页只在首行计一次片开销
-        counted.add(u.tbl.id)
-        used += u.first ? u.tbl.firstOverhead : u.tbl.contOverhead
+    }
+    used += allFns.length ? FN_SEP_H + refsH(allFns) : 0
+
+    const layouts = []
+    let optimal = true
+    for (let n = 0; n < wanted.length; n++) {
+      const { id, y: anchorY } = wanted[n]
+      const h = mnHeightOf(id)
+      let y = Math.min(anchorY, Math.max(0, contentH - h))
+
+      /* 自下而上错行：与任何更早的旁注冲突都继续上移。
+       * 只看上一条时，被上移后的第二条仍可能撞到第一条。 */
+      for (let pass = 0; pass < n + 1; pass++) {
+        let hit = -1
+        for (let k = 0; k < n; k++) {
+          const prev = layouts[k]
+          if (y < prev.y + prev.h + MN_GAP - EPS) hit = k
+        }
+        if (hit < 0) break
+        y = layouts[hit].y - h - MN_GAP
+      }
+      if (y < 0 || y + h > contentH + EPS) {
+        optimal = false // 顶 / 底放不下：锚点行应换到新页；空页强制容纳极端长注
+        y = clamp(y, 0, Math.max(0, contentH - h))
+      }
+      layouts.push({ id, y, h })
+    }
+    for (const id of extraNotes) {
+      if (!layouts.some(n => n.id === id) && !wanted.some(n => n.id === id)) {
+        layouts.push({ id, y: 0, h: mnHeightOf(id) })
       }
     }
-    space = contentH - used - (fns.length ? FN_SEP_H + refsH(fns) : 0)
+    return { used, layouts, optimal }
+  }
+
+  function rebuild() { // 回退行之后，按剩余单元重算脚注、旁注与可用高度
+    fns = []
+    notes = []
+    for (const u of items) {
+      for (const k of u.refs) if (!fns.includes(k)) fns.push(k)
+      for (const id of u.notes || []) if (!notes.includes(id)) notes.push(id)
+    }
+    const layout = pageLayout()
+    space = contentH - layout.used
+    return layout
   }
 
   /* 页尾兜底：若一页以“标题链 + 不足 n 行正文（n < KEEP_LINES）”收尾，
-   * 把标题链连同那点正文一起弹到下一页（其上的脚注随 rebuild 一并带走）。
+   * 把标题链连同那点正文一起弹到下一页（其上的脚注、旁注随 rebuild 一并带走）。
    * 标题链就在页首时退无可退，保留现状。 */
   function fixPageTail() {
     const end = items.length
@@ -393,10 +532,11 @@ function paginateUnits(units, contentH, fnH) {
 
   function closePage() {
     if (items.length) {
-      pages.push({ items, fns: fns.slice() })
+      const layout = pageLayout()
+      pages.push({ items, fns: fns.slice(), notes: layout.layouts })
       for (const k of fns) placedFn.add(k)
     }
-    items = []; fns = []; space = contentH
+    items = []; fns = []; notes = []; space = contentH
   }
 
   for (;;) {
@@ -405,18 +545,22 @@ function paginateUnits(units, contentH, fnH) {
     const nrefs = fresh(u)
     const need = rowOverhead(u, items) + u.height + u.tail + refsH(nrefs) +
       (nrefs.length && fns.length === 0 ? FN_SEP_H : 0)
+    const trial = pageLayout(items, [u], nrefs, u.notes || [])
 
     /* keep-with-next：标题（及其后连续标题）+ 下一段至少 KEEP_LINES 行必须同页。
-     * 前瞻若首次把某张表带入这一页，要把该表首片开销一起算上。 */
+     * 前瞻若首次把某张表带入这一页，要把该表首片开销一起算上；
+     * 标题与跟随文字所带的旁注也一并试排，不能只让正文同页。 */
     if (u.keepNext && items.length) {
       let look = need
       const sepCounted = nrefs.length > 0 && fns.length === 0 // need 里已含分隔线高度
       const seen = nrefs.slice()
-      const sim = items.slice() // 前瞻中“已装本页”的单元，只用于算表片开销
+      const ahead = []
+      const aheadNotes = (u.notes || []).slice()
       const addLook = w => {
         const wr = fresh(w, seen); seen.push(...wr)
-        look += rowOverhead(w, sim) + w.height + w.tail + refsH(wr)
-        sim.push(w)
+        look += rowOverhead(w, items.concat(ahead)) + w.height + w.tail + refsH(wr)
+        for (const id of w.notes || []) if (!aheadNotes.includes(id)) aheadNotes.push(id)
+        ahead.push(w)
       }
       let j = i + 1
       while (j < units.length && units[j].kind === 'block' && units[j].keepNext) {
@@ -431,13 +575,18 @@ function paginateUnits(units, contentH, fnH) {
         if (w.kind === 'line') { gathered++; j++ } else break
       }
       if (seen.length && fns.length === 0 && !sepCounted) look += FN_SEP_H
-      if (look > space + EPS) { fixPageTail(); closePage(); continue }
+      const keepLayout = pageLayout(items, [u, ...ahead], [], aheadNotes)
+      if (look > space + EPS || !keepLayout.optimal) {
+        fixPageTail(); closePage(); continue
+      }
     }
 
-    if (need <= space + EPS || items.length === 0) {
+    if ((need <= space + EPS || items.length === 0) &&
+        (trial.optimal || items.length === 0)) {
       items.push(u)
       fns.push(...nrefs)
-      space -= need
+      for (const id of u.notes || []) if (!notes.includes(id)) notes.push(id)
+      space = contentH - trial.used
       i++
     } else {
       /* 段落被页界截断时的孤行/寡行回退。表行不在此处回退——它只能在行间断，
@@ -477,19 +626,22 @@ function renderPages(pages, geo, meta) {
 
   pages.forEach((pg, pi) => {
     const page = document.createElement('section')
-    page.className = 'page'
+    const even = (pi + 1) % 2 === 0 // 以连续的物理页码定左右开
+    const padL = even ? geo.mOuter : geo.mInner
+    const padR = even ? geo.mInner : geo.mOuter
+    page.className = 'page' + (geo.noteW > 0 ? (even ? ' has-mn even-page' : ' has-mn odd-page') : '')
     page.id = 'p' + (pi + 1) // 目录条目的锚点目标
     page.style.width = geo.W + 'px'
     page.style.height = geo.H + 'px'
-    page.style.padding = `${geo.mT}px ${geo.mX}px ${geo.mB}px`
+    page.style.padding = `${geo.mT}px ${padR}px ${geo.mB}px ${padL}px`
 
     /* 对开页眉：目录页只写「目录」；正文偶数页（左页）左外侧写书名、右侧留空，
        奇数页（右页）左侧留空、右外侧写本页所属小节名。
        归属小节由调用方从同一次分页结果逐页算好（meta.sectionHeads），
        左右两侧同源一次渲染，落页变化时不会一边已换新节、一边还挂旧节。 */
     const header = document.createElement('header')
-    header.style.left = geo.mX + 'px'
-    header.style.right = geo.mX + 'px'
+    header.style.left = padL + 'px'
+    header.style.right = padR + 'px'
     if (pi < meta.tocCount) {
       header.className = 'page-header ph-toc'
       const hCenter = document.createElement('span')
@@ -497,7 +649,6 @@ function renderPages(pages, geo, meta) {
       hCenter.textContent = '目录'
       header.appendChild(hCenter)
     } else {
-      const even = (pi + 1) % 2 === 0 // 以连续的物理页码定左右开
       header.className = 'page-header ' + (even ? 'ph-even' : 'ph-odd')
       const hLeft = document.createElement('span')
       hLeft.className = 'ph-left'
@@ -519,8 +670,8 @@ function renderPages(pages, geo, meta) {
 
     const footer = document.createElement('footer')
     footer.className = 'page-footer'
-    footer.style.left = geo.mX + 'px'
-    footer.style.right = geo.mX + 'px'
+    footer.style.left = padL + 'px'
+    footer.style.right = padR + 'px'
     const num = document.createElement('span')
     num.className = 'pf-num'
     num.textContent = `第 ${pi + 1} 页 / 共 ${total} 页`
@@ -598,12 +749,28 @@ function renderPages(pages, geo, meta) {
     }
     finishTable()
 
+    /* 旁注：布局结果只属于当前分页结果，注与锚点行同页。
+     * 偶数物理页是左页，旁注在版心左外侧；奇数页相反。 */
+    const notesLayer = document.createElement('div')
+    notesLayer.className = 'page-margin-notes'
+    for (const n of pg.notes || []) {
+      if (!meta.notes || !meta.notes.has(n.id)) continue
+      const aside = document.createElement('aside')
+      aside.className = 'margin-note' + (even ? ' mn-left' : ' mn-right')
+      aside.style.top = (geo.mT + n.y) + 'px'
+      aside.style.width = geo.noteW + 'px'
+      if (even) aside.style.left = MN_EDGE + 'px'
+      else aside.style.right = MN_EDGE + 'px'
+      aside.innerHTML = meta.notes.get(n.id) || ''
+      notesLayer.appendChild(aside)
+    }
+
     /* 脚注区：锚定在页底边距上方 */
     if (pg.fns.length) {
       const fnsEl = document.createElement('div')
       fnsEl.className = 'page-fns'
-      fnsEl.style.left = geo.mX + 'px'
-      fnsEl.style.right = geo.mX + 'px'
+      fnsEl.style.left = padL + 'px'
+      fnsEl.style.right = padR + 'px'
       fnsEl.style.bottom = geo.mB + 'px'
       const sep = document.createElement('div')
       sep.className = 'fn-sep'
@@ -620,9 +787,9 @@ function renderPages(pages, geo, meta) {
         d.append(no, tx)
         fnsEl.appendChild(d)
       }
-      page.append(header, body, fnsEl, footer)
+      page.append(header, body, notesLayer, fnsEl, footer)
     } else {
-      page.append(header, body, footer)
+      page.append(header, body, notesLayer, footer)
     }
 
     frag.appendChild(page)
