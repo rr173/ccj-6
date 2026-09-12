@@ -259,19 +259,24 @@ button.primary:hover { background: #1d4ed8; }
 }
 .doc-flow h2.index-group:first-of-type { margin-top: 0; }
 .doc-flow .index-entry {
-  /* 悬挂缩进由切出的视觉行（.ln）各自承担：整个条目统一左缩进 2em，
-   * 只有首行用负 text-indent 回到最左。必须落在 .ln 上——切行后每个
-   * 视觉行都是独立块，写在 <p> 上的 text-indent 只会作用于第一行块，
-   * padding 也不会传进 .ln 的内容盒。 */
+  /* 悬挂缩进直接写在条目段落上：padding-left 缩进整段、负 text-indent
+   * 把首行拉回最左。这样测量断行时首行就是通栏宽、续行就是缩进 2em
+   * 后的宽度——与切行后 .ln 的渲染几何完全一致。若把缩进只写在切出的
+   * .ln 上，断行仍按通栏宽量、续行渲染却窄 2em，三行以上的长条目中间
+   * 行会在 .ln 内部再次折行，甩出一截楼梯状的残行。 */
   margin: 0 0 4px;
-  padding-left: 0;
-  text-indent: 0;
+  padding-left: 2em;
+  text-indent: -2em;
   text-align: left;
 }
 .doc-flow .index-entry .ln {
-  padding-left: 2em;
+  /* .ln 是段落 padding 内的块级子盒，天然落在缩进后的位置；
+   * text-indent 会继承，续行必须清零，否则每行都被拉回最左 */
+  text-indent: 0;
 }
 .doc-flow .index-entry .ln-first {
+  /* 首行负缩进回到最左：可用宽度 = 段内容宽 + 2em = 通栏宽，
+   * 与测量时首行的行宽一致 */
   text-indent: -2em;
 }
 .index-term {

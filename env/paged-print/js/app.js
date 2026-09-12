@@ -91,7 +91,11 @@ function indexLetterOf(term) {
  * 行单元可能在视觉行界被切开，标记被克隆成两个半截（各带相同 data-idx-id）；
  * 用 id 去重，每个标记只认它“起始”的那一页（扫描顺序里第一次出现的页），
  * 这样一个词被行界劈成两半时只计起始页、且用切行前固化的完整词目计名。
- * 页码为物理页码（目录 + 正文相对页）。同一页出现多次只记一次、自然升序。 */
+ * 页码为物理页码（目录 + 正文相对页）。同一页出现多次只记一次、自然升序。
+ * 词条恰好起自行首又被行界切开时，切出的首条视觉行整个留在原标记元素
+ * 内部（.idx 是 .ln 的祖先而非后代），只查后代会漏掉起始碎片——轻则把
+ * 词条记到后半截所在的页，重则（整段只有这个词时）整条从索引里消失；
+ * 与旁注一样，后代与祖先链都要查。 */
 function collectIndexEntries(bodyPages, tocCount) {
   const pages = new Map() // 规范词条 → 物理页码数组
   const seenIds = new Set()
@@ -107,7 +111,10 @@ function collectIndexEntries(bodyPages, tocCount) {
       for (const u of col.items) {
         const root = u.el
         if (!root || !root.querySelectorAll) continue
-        for (const el of root.querySelectorAll('.idx')) {
+        const marks = [...root.querySelectorAll('.idx')]
+        const ancestor = root.closest && root.closest('.idx')
+        if (ancestor && !marks.includes(ancestor)) marks.unshift(ancestor)
+        for (const el of marks) {
           const id = el.dataset.idxId
           if (id) {
             if (seenIds.has(id)) continue
